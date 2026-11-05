@@ -270,6 +270,30 @@ label { display: grid; gap: 6px; font-size: 13px; color: var(--muted); font-weig
 .pago-check { align-self: end; }
 .small { font-size: 13px; }
 
+/* ---------- acesso somente leitura e usuários ---------- */
+.leitura-tag {
+  margin: 0 0 10px; font-size: 13px; font-weight: 700; color: var(--accent-strong);
+  background: var(--accent-soft); padding: 8px 12px; border-radius: 10px;
+}
+body.leitor .pay-toggle { pointer-events: none; }
+.sheet-body { display: grid; gap: 14px; padding: 16px 16px calc(env(safe-area-inset-bottom) + 16px); }
+.sheet form.user-new { padding: 14px 0 0; border-top: 1px solid var(--border); }
+.user-new h3 { margin: 0; font-size: 16px; }
+.users-list { display: grid; gap: 10px; }
+.user-card { padding: 12px; display: grid; gap: 10px; }
+.user-top { display: grid; gap: 2px; }
+.user-actions { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.user-actions .btn { min-height: 38px; padding: 8px 14px; }
+.chips-wrap { display: flex; flex-wrap: wrap; gap: 8px; }
+.chk-chip { display: inline-flex; cursor: pointer; position: relative; }
+.chk-chip input { position: absolute; opacity: 0; pointer-events: none; width: 1px; height: 1px; min-height: 0; }
+.chk-chip span {
+  border: 1px solid var(--border); background: var(--surface); padding: 7px 12px;
+  border-radius: 99px; font-size: 14px; font-weight: 600; color: var(--text);
+}
+.chk-chip input:checked + span { background: var(--accent); border-color: var(--accent); color: #fff; }
+.chk-chip input:focus-visible + span { outline: 2px solid var(--accent); }
+
 .toast {
   position: fixed; left: 50%; transform: translateX(-50%);
   bottom: calc(env(safe-area-inset-bottom) + 92px); z-index: 30;

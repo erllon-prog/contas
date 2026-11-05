@@ -21,7 +21,8 @@
     editing: null,              // conta em edição (ou null)
     removeNota: false,
     origemTocada: false,        // usuário escolheu a origem à mão neste formulário
-    hist: { origens: [], porDescricao: new Map(), descricoes: [] }
+    hist: { origens: [], porDescricao: new Map(), descricoes: [] },
+    perfil: null                // papel do usuário logado: admin ou leitor
   };
 
   // ---------------------------------------------------------------- utilitários
@@ -107,8 +108,25 @@
     state.user = user;
     $("#view-login").hidden = !!user;
     $("#view-app").hidden = !user;
-    if (user && changed) { loadMonth(); loadHistory(); }
-    if (!user) { state.contas = []; render(); }
+    if (user && changed) loadPerfil().then(() => { loadMonth(); loadHistory(); });
+    if (!user) { state.contas = []; state.perfil = null; aplicarPapel(); render(); }
+  }
+
+  const ehLeitor = () => state.perfil?.papel === "leitor";
+  async function loadPerfil() {
+    const { data } = await sb.from("perfis").select("*").eq("id", state.user.id).maybeSingle();
+    state.perfil = data || null;
+    aplicarPapel();
+  }
+  function aplicarPapel() {
+    const leitor = ehLeitor();
+    document.body.classList.toggle("leitor", leitor);
+    $("#add-btn").hidden = leitor;
+    $("#copy-monthly").hidden = leitor;
+    $("#open-users").hidden = state.perfil?.papel !== "admin";
+    const tag = $("#modo-leitura");
+    tag.hidden = !leitor;
+    tag.textContent = leitor ? `Olá, ${state.perfil.nome || ""}! Você está vendo as contas em modo somente leitura.` : "";
   }
 
   $("#login-form").addEventListener("submit", async (e) => {
@@ -291,7 +309,7 @@
     const conta = state.contas.find((c) => c.id === id);
     if (!conta) return;
     if (btn.dataset.action === "edit") openForm(conta);
-    if (btn.dataset.action === "toggle") togglePago(conta);
+    if (btn.dataset.action === "toggle" && !ehLeitor()) togglePago(conta);
   });
 
   async function togglePago(conta) {
@@ -475,6 +493,13 @@
     }
     $("#nota-atual").hidden = !(conta && conta.nota_path);
     renderOrigemChips();
+    // leitor: só visualiza (e abre a nota fiscal)
+    const ro = ehLeitor();
+    form.querySelectorAll("input, select, textarea, #tipo-seg button, #origem-chips button").forEach((el) => { el.disabled = ro; });
+    form.querySelector(".sheet-foot").hidden = ro;
+    form.querySelector(".file-btn").hidden = ro;
+    $("#nota-remover").hidden = ro;
+    if (ro) { $("#form-title").textContent = "Detalhe"; $("#mais-opcoes").open = true; }
     if (!dlg.open) dlg.showModal();
     if (!conta) setTimeout(() => form.valor.focus(), 60);
   }
@@ -620,6 +645,105 @@
     if (w) w.location.href = data.signedUrl;
     else window.location.href = data.signedUrl;
   }
+
+  // ---------------------------------------------------------------- usuários (somente administrador)
+  const usersDlg = $("#users-dialog");
+  const userForm = $("#user-form");
+  let usuarios = [];
+
+  function origemChecks(sel) {
+    return state.hist.origens.map((o) =>
+      `<label class="chk-chip"><input type="checkbox" value="${esc(o)}"${sel.includes(o) ? " checked" : ""}><span>${esc(o)}</span></label>`
+    ).join("") || `<span class="muted small">Nenhuma origem cadastrada ainda.</span>`;
+  }
+  function marcadas(el) { return [...el.querySelectorAll("input[type=checkbox]:checked")].map((i) => i.value); }
+
+  async function chamarFuncao(body) {
+    const { data, error } = await sb.functions.invoke("usuarios", { body });
+    if (error) {
+      let msg = error.message;
+      try { const j = await error.context.json(); if (j?.error || j?.message || j?.msg) msg = j.error || j.message || j.msg; } catch {}
+      throw new Error(msg);
+    }
+    if (data?.error) throw new Error(data.error);
+    return data;
+  }
+
+  async function loadUsuarios() {
+    const { data, error } = await sb.from("perfis").select("*").eq("dono", state.user.id).order("created_at");
+    if (error) { toast(friendlyError(error)); return; }
+    usuarios = data || [];
+    $("#users-list").innerHTML = usuarios.length ? usuarios.map((u) => `
+      <div class="card user-card" data-id="${u.id}">
+        <div class="user-top"><strong>${esc(u.nome || u.email)}</strong><span class="muted small">${esc(u.email || "")}</span></div>
+        <div class="chips-wrap">${origemChecks(u.origens || [])}</div>
+        <div class="user-actions">
+          <button type="button" class="btn" data-acao="salvar">Salvar acesso</button>
+          <button type="button" class="link" data-acao="senha">Trocar senha</button>
+          <button type="button" class="link danger" data-acao="excluir">Excluir</button>
+        </div>
+      </div>`).join("") : `<p class="muted small">Ainda não há outros usuários.</p>`;
+  }
+
+  $("#open-users").addEventListener("click", async () => {
+    closeMenu();
+    userForm.reset();
+    $("#user-error").hidden = true;
+    $("#user-origens").innerHTML = origemChecks(state.origem ? [state.origem] : []);
+    usersDlg.showModal();
+    await loadUsuarios();
+  });
+  $("#users-close").addEventListener("click", () => usersDlg.close());
+  usersDlg.addEventListener("click", (e) => { if (e.target === usersDlg) usersDlg.close(); });
+
+  userForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const err = $("#user-error");
+    err.hidden = true;
+    const origens = marcadas($("#user-origens"));
+    if (!origens.length) { err.textContent = "Marque pelo menos uma origem que essa pessoa pode ver."; err.hidden = false; return; }
+    const btn = $("#user-create");
+    btn.disabled = true; btn.textContent = "Criando...";
+    try {
+      await chamarFuncao({ acao: "criar", nome: userForm.nome.value.trim(), email: userForm.email.value.trim(), senha: userForm.senha.value, origens });
+      toast("Usuário criado. Passe o e-mail e a senha para a pessoa.");
+      userForm.reset();
+      $("#user-origens").innerHTML = origemChecks([]);
+      await loadUsuarios();
+    } catch (ex) {
+      err.textContent = ex.message; err.hidden = false;
+    } finally {
+      btn.disabled = false; btn.textContent = "Criar usuário";
+    }
+  });
+
+  $("#users-list").addEventListener("click", async (e) => {
+    const b = e.target.closest("[data-acao]");
+    if (!b) return;
+    const card = b.closest("[data-id]");
+    const id = card.dataset.id;
+    const u = usuarios.find((x) => x.id === id);
+    const quem = u?.nome || u?.email || "este usuário";
+    try {
+      if (b.dataset.acao === "salvar") {
+        const { error } = await sb.from("perfis").update({ origens: marcadas(card) }).eq("id", id);
+        if (error) throw error;
+        toast("Acesso atualizado.");
+      } else if (b.dataset.acao === "senha") {
+        const senha = prompt(`Nova senha para ${quem} (mínimo 8 caracteres):`);
+        if (!senha) return;
+        await chamarFuncao({ acao: "senha", id, senha });
+        toast("Senha alterada.");
+      } else if (b.dataset.acao === "excluir") {
+        if (!confirm(`Excluir o acesso de ${quem}? As suas contas não são afetadas.`)) return;
+        await chamarFuncao({ acao: "excluir", id });
+        toast("Usuário excluído.");
+        await loadUsuarios();
+      }
+    } catch (ex) {
+      toast(friendlyError(ex));
+    }
+  });
 
   // ---------------------------------------------------------------- PDF para enviar
   const pdfDlg = $("#pdf-dialog");
