@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self'; img-src 'self' data: blob: https://sqbgzvjowecatrqxcvly.supabase.co; connect-src 'self' https://sqbgzvjowecatrqxcvly.supabase.co wss://sqbgzvjowecatrqxcvly.supabase.co https://cdn.jsdelivr.net; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#0f5132">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Contas">
+  <title>Contas</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <!-- LOGIN -->
+  <section id="view-login" class="login" hidden>
+    <form id="login-form" class="login-card" autocomplete="on">
+      <img src="icons/icon-192.png" alt="" class="login-logo">
+      <h1>Contas</h1>
+      <p class="muted">Entre com seu e-mail e senha.</p>
+      <label>E-mail
+        <input type="email" name="email" autocomplete="username" required>
+      </label>
+      <label>Senha
+        <input type="password" name="password" autocomplete="current-password" required>
+      </label>
+      <button type="submit" class="btn primary block">Entrar</button>
+      <p id="login-error" class="error" hidden></p>
+    </form>
+  </section>
+
+  <!-- APP -->
+  <section id="view-app" hidden>
+    <header class="topbar">
+      <button class="icon-btn" id="prev-month" aria-label="Mês anterior">‹</button>
+      <button class="month" id="month-label" aria-label="Escolher mês"></button>
+      <button class="icon-btn" id="next-month" aria-label="Próximo mês">›</button>
+      <input type="month" id="month-picker" class="sr-only" tabindex="-1">
+      <button class="icon-btn menu-btn" id="menu-btn" aria-label="Menu">⋯</button>
+    </header>
+
+    <div id="menu" class="menu" hidden>
+      <button id="copy-monthly">Trazer contas mensais do mês anterior</button>
+      <button id="export-csv">Exportar mês em CSV</button>
+      <button id="logout" class="danger">Sair</button>
+    </div>
+
+    <main class="content">
+      <section class="summary">
+        <div class="card stat">
+          <span class="stat-label">Total do mês</span>
+          <strong id="sum-total">R$ 0,00</strong>
+        </div>
+        <div class="card stat">
+          <span class="stat-label">A pagar</span>
+          <strong id="sum-open" class="warn">R$ 0,00</strong>
+        </div>
+        <div class="card stat">
+          <span class="stat-label">Pago</span>
+          <strong id="sum-paid" class="ok">R$ 0,00</strong>
+        </div>
+      </section>
+
+      <div class="progress" aria-hidden="true"><div id="progress-bar"></div></div>
+
+      <nav class="filters" role="tablist">
+        <button data-filter="todas" class="chip active">Todas</button>
+        <button data-filter="abertas" class="chip">A pagar</button>
+        <button data-filter="pagas" class="chip">Pagas</button>
+      </nav>
+
+      <ul id="list" class="list"></ul>
+      <p id="empty" class="empty" hidden>Nenhuma conta neste mês. Toque em <b>+</b> para lançar.</p>
+    </main>
+
+    <button id="add-btn" class="fab" aria-label="Nova conta">+</button>
+  </section>
+
+  <!-- FORMULÁRIO -->
+  <dialog id="form-dialog" class="sheet">
+    <form id="conta-form" method="dialog">
+      <header class="sheet-head">
+        <h2 id="form-title">Nova conta</h2>
+        <button type="button" class="icon-btn" id="form-close" aria-label="Fechar">✕</button>
+      </header>
+
+      <label>Descrição
+        <input name="descricao" required maxlength="120" placeholder="Ex: Energia, Cartão Nubank, Mercado">
+      </label>
+
+      <div class="row">
+        <label>Valor (R$)
+          <input name="valor" required inputmode="decimal" placeholder="0,00">
+        </label>
+        <label>Vencimento
+          <input name="vencimento" type="date">
+        </label>
+      </div>
+
+      <div class="row">
+        <label>Tipo
+          <select name="tipo" required>
+            <option value="avista">À vista</option>
+            <option value="parcelado">Parcelado</option>
+            <option value="mensal">Mensal (fixa)</option>
+            <option value="avulso">Avulso</option>
+          </select>
+        </label>
+        <label>Mês de referência
+          <input name="mes_referencia" type="month" required>
+        </label>
+      </div>
+
+      <div class="row" id="parcelas-row" hidden>
+        <label>Parcela atual
+          <input name="parcela_atual" type="number" min="1" inputmode="numeric">
+        </label>
+        <label>Total de parcelas
+          <input name="total_parcelas" type="number" min="1" inputmode="numeric">
+        </label>
+      </div>
+      <label class="check" id="gerar-row" hidden>
+        <input type="checkbox" name="gerar_parcelas" checked>
+        Lançar também as próximas parcelas nos meses seguintes
+      </label>
+
+      <label>Origem
+        <input name="origem" list="origens" maxlength="60" placeholder="Cartão, Pix, Boleto, Débito...">
+        <datalist id="origens"></datalist>
+      </label>
+
+      <div class="row">
+        <label class="check inline">
+          <input type="checkbox" name="pago"> Pago
+        </label>
+        <label>Data do pagamento
+          <input name="data_pagamento" type="date">
+        </label>
+      </div>
+
+      <label>Observação
+        <textarea name="observacao" rows="2" maxlength="500"></textarea>
+      </label>
+
+      <div class="nota-box">
+        <span class="stat-label">Nota fiscal / comprovante</span>
+        <div id="nota-atual" class="nota-atual" hidden>
+          <button type="button" class="link" id="nota-ver">Ver arquivo</button>
+          <button type="button" class="link danger" id="nota-remover">Remover</button>
+        </div>
+        <input type="file" name="nota" accept="image/*,application/pdf">
+      </div>
+
+      <footer class="sheet-foot">
+        <button type="button" class="btn danger-outline" id="form-delete" hidden>Excluir</button>
+        <button type="submit" class="btn primary" id="form-save">Salvar</button>
+      </footer>
+      <p id="form-error" class="error" hidden></p>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
