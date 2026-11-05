@@ -15,6 +15,7 @@
     month: currentMonthKey(),   // "AAAA-MM"
     contas: [],
     filter: "todas",
+    origem: "",                 // filtro de origem ("" = todas)
     editing: null,              // conta em edição (ou null)
     removeNota: false
   };
@@ -143,7 +144,8 @@
 
   function render() {
     const list = $("#list");
-    const all = state.contas;
+    const doMes = state.contas;
+    const all = state.origem ? doMes.filter((c) => (c.origem || "") === state.origem) : doMes;
 
     const total = all.reduce((s, c) => s + Number(c.valor), 0);
     const pago = all.filter((c) => c.pago).reduce((s, c) => s + Number(c.valor), 0);
@@ -158,7 +160,7 @@
     // não pagas primeiro, depois pagas
     rows = [...rows].sort((a, b) => Number(a.pago) - Number(b.pago));
 
-    $("#empty").hidden = all.length > 0;
+    $("#empty").hidden = doMes.length > 0;
     if (all.length > 0 && rows.length === 0) {
       list.innerHTML = `<li class="empty">Nada por aqui neste filtro.</li>`;
     } else {
@@ -167,14 +169,24 @@
 
     // sugestões de origem
     const origens = new Set(ORIGENS_PADRAO);
-    all.forEach((c) => c.origem && origens.add(c.origem));
+    doMes.forEach((c) => c.origem && origens.add(c.origem));
     $("#origens").innerHTML = [...origens].map((o) => `<option value="${esc(o)}">`).join("");
+
+    // filtro de origem (só as que existem no mês, mais a selecionada)
+    const usadas = [...new Set(doMes.map((c) => c.origem).filter(Boolean))].sort((a, b) => a.localeCompare(b, "pt-BR"));
+    if (state.origem && !usadas.includes(state.origem)) usadas.unshift(state.origem);
+    const sel = $("#origem-filter");
+    sel.innerHTML = `<option value="">Todas as origens</option>` +
+      usadas.map((o) => `<option value="${esc(o)}">${esc(o)}</option>`).join("");
+    sel.value = state.origem;
+    sel.classList.toggle("active", !!state.origem);
   }
 
   const TIPO_LABEL = { avista: "À vista", parcelado: "Parcelado", mensal: "Mensal", avulso: "Avulso" };
 
   function itemHtml(c) {
     const meta = [];
+    if (c.data_compra) meta.push(`<span>Compra ${fmtDate(c.data_compra)}</span>`);
     if (c.vencimento) {
       meta.push(isOverdue(c)
         ? `<span class="badge late">Venceu ${fmtDate(c.vencimento)}</span>`
@@ -234,6 +246,8 @@
     if (e.target.value) { state.month = e.target.value; loadMonth(); }
   });
 
+  $("#origem-filter").addEventListener("change", (e) => { state.origem = e.target.value; render(); });
+
   document.querySelectorAll(".chip").forEach((chip) => chip.addEventListener("click", () => {
     document.querySelectorAll(".chip").forEach((c) => c.classList.toggle("active", c === chip));
     state.filter = chip.dataset.filter;
@@ -258,6 +272,7 @@
         descricao: c.descricao, valor: c.valor, tipo: "mensal", origem: c.origem, observacao: c.observacao,
         mes_referencia: monthToDb(state.month),
         vencimento: addMonthsDate(c.vencimento, 1),
+        data_compra: null,
         pago: false
       }));
     if (!novas.length) { toast("Nenhuma conta mensal nova para trazer."); return; }
@@ -269,7 +284,7 @@
 
   $("#export-csv").addEventListener("click", () => {
     closeMenu();
-    const cols = ["descricao", "valor", "vencimento", "tipo", "parcela_atual", "total_parcelas", "origem", "pago", "data_pagamento", "observacao"];
+    const cols = ["descricao", "valor", "data_compra", "vencimento", "tipo", "parcela_atual", "total_parcelas", "origem", "pago", "data_pagamento", "observacao"];
     const cell = (v) => {
       if (v === null || v === undefined) return "";
       if (typeof v === "boolean") return v ? "sim" : "não";
@@ -313,6 +328,7 @@
       form.descricao.value = conta.descricao;
       form.valor.value = valorToInput(conta.valor);
       form.vencimento.value = conta.vencimento || "";
+      form.data_compra.value = conta.data_compra || "";
       form.tipo.value = conta.tipo;
       form.mes_referencia.value = conta.mes_referencia.slice(0, 7);
       form.parcela_atual.value = conta.parcela_atual || "";
@@ -361,6 +377,7 @@
       descricao: form.descricao.value.trim(),
       valor,
       vencimento: form.vencimento.value || null,
+      data_compra: form.data_compra.value || null,
       mes_referencia: monthToDb(form.mes_referencia.value),
       tipo,
       parcela_atual: tipo === "parcelado" ? (parseInt(form.parcela_atual.value, 10) || null) : null,
@@ -458,6 +475,163 @@
     if (w) w.location.href = data.signedUrl;
     else window.location.href = data.signedUrl;
   }
+
+  // ---------------------------------------------------------------- PDF para enviar
+  const pdfDlg = $("#pdf-dialog");
+  const pdfForm = $("#pdf-form");
+  const PDF_ORIGEM_KEY = "contas.pdfOrigem";
+
+  function pdfRows() {
+    const origem = pdfForm.origem.value;
+    let rows = state.contas.filter((c) => !origem || (c.origem || "") === origem);
+    if (pdfForm.so_abertas.checked) rows = rows.filter((c) => !c.pago);
+    return rows;
+  }
+  function updatePdfPreview() {
+    const rows = pdfRows();
+    const total = rows.reduce((s, c) => s + Number(c.valor), 0);
+    $("#pdf-preview").textContent = `${rows.length} conta(s) · ${brl.format(total)}`;
+  }
+
+  $("#open-pdf").addEventListener("click", () => {
+    closeMenu();
+    const origens = [...new Set(state.contas.map((c) => c.origem).filter(Boolean))].sort((a, b) => a.localeCompare(b, "pt-BR"));
+    let saved = "";
+    try { saved = localStorage.getItem(PDF_ORIGEM_KEY) || ""; } catch {}
+    const sel = $("#pdf-origem");
+    sel.innerHTML = `<option value="">Todas as origens</option>` +
+      origens.map((o) => `<option value="${esc(o)}">${esc(o)}</option>`).join("");
+    sel.value = origens.includes(state.origem) ? state.origem : (origens.includes(saved) ? saved : "");
+    $("#pdf-month").textContent = `Referência: ${monthLabel(state.month)}`;
+    $("#pdf-error").hidden = true;
+    updatePdfPreview();
+    pdfDlg.showModal();
+  });
+  $("#pdf-close").addEventListener("click", () => pdfDlg.close());
+  pdfDlg.addEventListener("click", (e) => { if (e.target === pdfDlg) pdfDlg.close(); });
+  pdfForm.origem.addEventListener("change", updatePdfPreview);
+  pdfForm.so_abertas.addEventListener("change", updatePdfPreview);
+
+  let jsPdfPromise;
+  function loadJsPdf() {
+    if (window.jspdf) return Promise.resolve(window.jspdf);
+    jsPdfPromise ||= new Promise((resolve, reject) => {
+      const sc = document.createElement("script");
+      sc.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
+      sc.onload = () => resolve(window.jspdf);
+      sc.onerror = () => { jsPdfPromise = null; reject(new Error("Não foi possível carregar o gerador de PDF. Verifique a internet.")); };
+      document.head.appendChild(sc);
+    });
+    return jsPdfPromise;
+  }
+
+  function buildPdf(jsPDF, rows, origem) {
+    const doc = new jsPDF({ unit: "mm", format: "a4" });
+    const L = 18, R = 192, W = R - L;
+    let y = 20;
+    const money = (n) => brl.format(n);
+    const ensure = (h) => { if (y + h > 280) { doc.addPage(); y = 20; } };
+
+    doc.setFont("helvetica", "bold"); doc.setFontSize(17); doc.setTextColor(20, 32, 27);
+    doc.text(`Contas - ${monthLabel(state.month)}`, L, y);
+    y += 7;
+    doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(95, 109, 102);
+    doc.text(`${origem ? "Origem: " + origem + "  ·  " : ""}Gerado em ${fmtDate(todayStr())}/${todayStr().slice(0, 4)}`, L, y);
+    y += 8;
+
+    function section(title, items, cols) {
+      if (!items.length) return 0;
+      ensure(22);
+      doc.setFillColor(220, 227, 223); doc.rect(L, y - 5, W, 8, "F");
+      doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.setTextColor(20, 32, 27);
+      doc.text(title, L + 2, y);
+      y += 8;
+      doc.setFontSize(9); doc.setTextColor(95, 109, 102);
+      cols.forEach((c) => doc.text(c.label, c.x, y, { align: c.align || "left" }));
+      y += 2; doc.setDrawColor(200, 208, 204); doc.line(L, y, R, y); y += 5;
+      doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(20, 32, 27);
+      let sub = 0;
+      items.forEach((c) => {
+        ensure(7);
+        cols.forEach((col) => {
+          let v = col.get(c);
+          if (col.max) v = doc.splitTextToSize(v, col.max)[0];
+          doc.text(v, col.x, y, { align: col.align || "left" });
+        });
+        sub += Number(c.valor);
+        y += 6.5;
+      });
+      ensure(9);
+      doc.line(L, y - 3.5, R, y - 3.5);
+      doc.setFont("helvetica", "bold");
+      doc.text("Subtotal", L + 2, y + 1);
+      doc.text(money(sub), 150, y + 1, { align: "right" });
+      y += 11;
+      return sub;
+    }
+
+    const byDate = (a, b) => ((a.data_compra || a.vencimento || "") < (b.data_compra || b.vencimento || "") ? -1 : 1);
+    const parceladas = rows.filter((c) => c.tipo === "parcelado").sort((a, b) => a.descricao.localeCompare(b.descricao, "pt-BR"));
+    const mensais = rows.filter((c) => c.tipo === "mensal").sort((a, b) => a.descricao.localeCompare(b.descricao, "pt-BR"));
+    const avulsas = rows.filter((c) => c.tipo === "avista" || c.tipo === "avulso").sort(byDate);
+
+    const desc = { label: "Descrição", x: L + 2, get: (c) => c.descricao, max: 100 };
+    const valor = { label: "Valor", x: 150, align: "right", get: (c) => money(Number(c.valor)) };
+    const status = { label: "Situação", x: R - 2, align: "right", get: (c) => (c.pago ? "Pago" : "A pagar") };
+
+    section("Parceladas", parceladas, [
+      desc, valor,
+      { label: "Parcela", x: 172, align: "right", get: (c) => (c.parcela_atual && c.total_parcelas ? `${c.parcela_atual}/${c.total_parcelas}` : "") },
+      status
+    ]);
+    section("Mensais", mensais, [desc, valor, status]);
+    section("Compras", avulsas, [
+      { label: "Data", x: L + 2, get: (c) => fmtDate(c.data_compra || c.vencimento) || "-" },
+      { label: "Descrição", x: L + 20, get: (c) => c.descricao, max: 85 },
+      valor, status
+    ]);
+
+    const total = rows.reduce((s, c) => s + Number(c.valor), 0);
+    ensure(14);
+    doc.setFillColor(15, 81, 50); doc.rect(L, y - 6, W, 10, "F");
+    doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold"); doc.setFontSize(13);
+    doc.text("TOTAL", L + 2, y + 0.5);
+    doc.text(money(total), 150, y + 0.5, { align: "right" });
+    return doc;
+  }
+
+  pdfForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const rows = pdfRows();
+    const errEl = $("#pdf-error");
+    errEl.hidden = true;
+    if (!rows.length) { errEl.textContent = "Nenhuma conta com esse filtro."; errEl.hidden = false; return; }
+    const btn = $("#pdf-go");
+    btn.disabled = true; btn.textContent = "Gerando...";
+    try {
+      const origem = pdfForm.origem.value;
+      try { localStorage.setItem(PDF_ORIGEM_KEY, origem); } catch {}
+      const { jsPDF } = await loadJsPdf();
+      const doc = buildPdf(jsPDF, rows, origem);
+      const slug = (origem ? "_" + safeFileName(origem) : "");
+      const name = `contas_${state.month}${slug}.pdf`;
+      const blob = doc.output("blob");
+      const file = new File([blob], name, { type: "application/pdf" });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        try { await navigator.share({ files: [file], title: name }); }
+        catch (err) { if (err.name !== "AbortError") throw err; }
+      } else {
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob); a.download = name; a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+      }
+      pdfDlg.close();
+    } catch (err) {
+      errEl.textContent = friendlyError(err); errEl.hidden = false;
+    } finally {
+      btn.disabled = false; btn.textContent = "Gerar e compartilhar";
+    }
+  });
 
   // ---------------------------------------------------------------- PWA
   if ("serviceWorker" in navigator) {

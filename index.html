@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self'; img-src 'self' data: blob: https://sqbgzvjowecatrqxcvly.supabase.co; connect-src 'self' https://sqbgzvjowecatrqxcvly.supabase.co wss://sqbgzvjowecatrqxcvly.supabase.co https://cdn.jsdelivr.net; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'self'; img-src 'self' data: blob: https://sqbgzvjowecatrqxcvly.supabase.co; connect-src 'self' https://sqbgzvjowecatrqxcvly.supabase.co wss://sqbgzvjowecatrqxcvly.supabase.co https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
   <meta name="referrer" content="no-referrer">
   <meta name="robots" content="noindex, nofollow">
   <meta name="theme-color" content="#0f5132">
@@ -45,6 +45,7 @@
     </header>
 
     <div id="menu" class="menu" hidden>
+      <button id="open-pdf">Gerar PDF do mês para enviar</button>
       <button id="copy-monthly">Trazer contas mensais do mês anterior</button>
       <button id="export-csv">Exportar mês em CSV</button>
       <button id="logout" class="danger">Sair</button>
@@ -72,6 +73,9 @@
         <button data-filter="todas" class="chip active">Todas</button>
         <button data-filter="abertas" class="chip">A pagar</button>
         <button data-filter="pagas" class="chip">Pagas</button>
+        <select id="origem-filter" class="chip-select" aria-label="Filtrar por origem">
+          <option value="">Todas as origens</option>
+        </select>
       </nav>
 
       <ul id="list" class="list"></ul>
@@ -101,6 +105,10 @@
           <input name="vencimento" type="date">
         </label>
       </div>
+
+      <label id="compra-row">Data da compra
+        <input name="data_compra" type="date">
+      </label>
 
       <div class="row">
         <label>Tipo
@@ -161,6 +169,28 @@
         <button type="submit" class="btn primary" id="form-save">Salvar</button>
       </footer>
       <p id="form-error" class="error" hidden></p>
+    </form>
+  </dialog>
+
+  <!-- PDF -->
+  <dialog id="pdf-dialog" class="sheet">
+    <form id="pdf-form" method="dialog">
+      <header class="sheet-head">
+        <h2>Gerar PDF</h2>
+        <button type="button" class="icon-btn" id="pdf-close" aria-label="Fechar">✕</button>
+      </header>
+      <p class="muted" id="pdf-month"></p>
+      <label>Origem das contas
+        <select name="origem" id="pdf-origem"></select>
+      </label>
+      <label class="check">
+        <input type="checkbox" name="so_abertas"> Somente contas ainda não pagas
+      </label>
+      <p id="pdf-preview" class="muted"></p>
+      <footer class="sheet-foot">
+        <button type="submit" class="btn primary" id="pdf-go">Gerar e compartilhar</button>
+      </footer>
+      <p id="pdf-error" class="error" hidden></p>
     </form>
   </dialog>
 
