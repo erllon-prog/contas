@@ -203,10 +203,12 @@
   }
 
   function renderOrigemTabs() {
-    const lista = origensDisponiveis();
+    // só as origens que têm contas no mês aberto, das mais usadas para as menos usadas
     const noMes = new Set(state.contas.map((c) => c.origem).filter(Boolean));
-    // origens com contas neste mês primeiro, depois as demais
-    lista.sort((a, b) => Number(noMes.has(b)) - Number(noMes.has(a)));
+    const pos = (o) => { const i = state.hist.origens.indexOf(o); return i < 0 ? 9999 : i; };
+    const lista = [...noMes].sort((a, b) => pos(a) - pos(b) || a.localeCompare(b, "pt-BR"));
+    // a origem filtrada continua visível (e marcada) mesmo sem contas no mês, para dar para desmarcar
+    if (state.origem && !noMes.has(state.origem)) lista.push(state.origem);
     const tabs = [["", "Todas"], ...lista.map((o) => [o, o])];
     $("#origem-tabs").innerHTML = tabs.map(([v, label]) =>
       `<button type="button" class="chip${state.origem === v ? " active" : ""}${v && !noMes.has(v) ? " dim" : ""}" data-origem="${esc(v)}">${esc(label)}</button>`
