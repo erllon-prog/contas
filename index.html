@@ -14,7 +14,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="app.css?v=3">
+  <link rel="stylesheet" href="app.css?v=4">
 </head>
 <body>
   <!-- LOGIN -->
@@ -116,12 +116,11 @@
       <div class="field">
         <span class="flabel">Tipo</span>
         <div class="seg" id="tipo-seg">
-          <button type="button" data-tipo="avista">À vista</button>
+          <button type="button" data-tipo="avulso">Avulso</button>
           <button type="button" data-tipo="parcelado">Parcelado</button>
           <button type="button" data-tipo="mensal">Mensal</button>
-          <button type="button" data-tipo="avulso">Avulso</button>
         </div>
-        <input type="hidden" name="tipo" value="avista">
+        <input type="hidden" name="tipo" value="avulso">
       </div>
 
       <div class="row" id="parcelas-row" hidden>
@@ -209,7 +208,7 @@
   <div id="toast" class="toast" role="status" hidden></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="config.js?v=3"></script>
-  <script src="app.js?v=3"></script>
+  <script src="config.js?v=4"></script>
+  <script src="app.js?v=4"></script>
 </body>
 </html>

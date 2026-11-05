@@ -1,7 +1,7 @@
 // Service worker: guarda só os arquivos do app (nunca os dados do Supabase).
-const CACHE = "contas-v3";
+const CACHE = "contas-v4";
 const SHELL = [
-  "./", "index.html", "app.css?v=3", "app.js?v=3", "config.js?v=3", "manifest.webmanifest",
+  "./", "index.html", "app.css?v=4", "app.js?v=4", "config.js?v=4", "manifest.webmanifest",
   "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png",
   "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"
 ];

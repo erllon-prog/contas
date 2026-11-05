@@ -17,6 +17,7 @@
     filter: "todas",
     origem: lsGet(LS.origem),   // filtro de origem ("" = todas)
     busca: "",
+    abertos: new Set((() => { try { return JSON.parse(lsGet("contas.gruposAbertos") || "[]"); } catch { return []; } })()),
     editing: null,              // conta em edição (ou null)
     removeNota: false,
     origemTocada: false,        // usuário escolheu a origem à mão neste formulário
@@ -172,6 +173,8 @@
   function isOverdue(c) {
     return !c.pago && c.vencimento && c.vencimento < todayStr();
   }
+  // parcela 1 = compra parcelada que entrou neste mês
+  function isNova(c) { return c.tipo === "parcelado" && c.parcela_atual === 1; }
 
   function origensDisponiveis() {
     const set = new Set(state.hist.origens);
@@ -195,7 +198,7 @@
   const GRUPOS = [
     { titulo: "Parceladas", tipos: ["parcelado"] },
     { titulo: "Mensais", tipos: ["mensal"] },
-    { titulo: "À vista", tipos: ["avista", "avulso"] }
+    { titulo: "Avulsos", tipos: ["avulso", "avista"] }
   ];
 
   function render() {
@@ -231,9 +234,16 @@
       const itens = rows.filter((c) => g.tipos.includes(c.tipo)).sort(ordem);
       if (!itens.length) return "";
       const sub = itens.reduce((s, c) => s + Number(c.valor), 0);
-      return `<section class="grupo">
-        <h3 class="grupo-head"><span>${g.titulo} <small>${itens.length}</small></span><span>${brl.format(sub)}</span></h3>
-        <ul class="list-ul">${itens.map(itemHtml).join("")}</ul>
+      const aberto = state.abertos.has(g.titulo) || !!state.busca;
+      const aPagar = itens.filter((c) => !c.pago).reduce((s, c) => s + Number(c.valor), 0);
+      const novas = itens.filter(isNova).length;
+      const nota = aPagar === 0 ? "tudo pago" : (aPagar < sub ? `a pagar ${brl.format(aPagar)}` : "");
+      return `<section class="grupo${aberto ? " aberto" : ""}">
+        <button type="button" class="grupo-head card" data-grupo="${g.titulo}" aria-expanded="${aberto}">
+          <span class="grupo-tit"><span class="chev" aria-hidden="true">›</span>${g.titulo} <small>${itens.length}</small>${novas ? ` <span class="badge novo">${novas} ${novas > 1 ? "novas" : "nova"}</span>` : ""}</span>
+          <span class="grupo-val">${brl.format(sub)}${nota ? `<small>${nota}</small>` : ""}</span>
+        </button>
+        ${aberto ? `<ul class="list-ul">${itens.map(itemHtml).join("")}</ul>` : ""}
       </section>`;
     }).join("");
   }
@@ -250,8 +260,6 @@
     }
     if (c.tipo === "parcelado" && c.parcela_atual && c.total_parcelas) {
       meta.push(`<span class="badge parcelado">${c.parcela_atual}/${c.total_parcelas}</span>`);
-    } else if (c.tipo === "avulso") {
-      meta.push(`<span class="badge">${TIPO_LABEL.avulso}</span>`);
     }
     if (c.origem && !state.origem) meta.push(`<span>${esc(c.origem)}</span>`);
     if (c.nota_path) meta.push(`<span title="Tem nota fiscal">📎</span>`);
@@ -261,7 +269,7 @@
       <li class="${cls}" data-id="${c.id}">
         <button class="pay-toggle" data-action="toggle" aria-label="${c.pago ? "Marcar como não paga" : "Marcar como paga"}"><span>✓</span></button>
         <button class="item-main" data-action="edit">
-          <div class="item-title">${esc(c.descricao)}</div>
+          <div class="item-title">${isNova(c) ? `<span class="badge novo">Novo</span> ` : ""}${esc(c.descricao)}</div>
           <div class="item-meta">${meta.join("")}</div>
         </button>
         <div class="item-value">${brl.format(Number(c.valor))}</div>
@@ -269,6 +277,14 @@
   }
 
   $("#list").addEventListener("click", async (e) => {
+    const grupo = e.target.closest("[data-grupo]");
+    if (grupo) {
+      const t = grupo.dataset.grupo;
+      if (state.abertos.has(t)) state.abertos.delete(t); else state.abertos.add(t);
+      lsSet("contas.gruposAbertos", JSON.stringify([...state.abertos]));
+      render();
+      return;
+    }
     const btn = e.target.closest("[data-action]");
     if (!btn) return;
     const id = btn.closest("li").dataset.id;
@@ -372,6 +388,7 @@
   const form = $("#conta-form");
 
   function setTipo(tipo) {
+    if (tipo === "avista") tipo = "avulso";
     form.tipo.value = tipo;
     document.querySelectorAll("#tipo-seg button").forEach((b) => b.classList.toggle("active", b.dataset.tipo === tipo));
     const parcelado = tipo === "parcelado";
@@ -453,7 +470,7 @@
       form.origem.value = manter?.origem ?? (state.origem || lsGet(LS.lastOrigem));
       form.data_compra.value = manter?.data_compra || todayStr();
       form.mes_referencia.value = manter?.mes || state.month;
-      setTipo(manter?.tipo || lsGet(LS.lastTipo) || "avista");
+      setTipo(manter?.tipo || lsGet(LS.lastTipo) || "avulso");
       if (form.tipo.value === "parcelado") form.total_parcelas.value = "";
     }
     $("#nota-atual").hidden = !(conta && conta.nota_path);
@@ -707,11 +724,11 @@
 
     section("Parceladas", parceladas, [
       desc, valor,
-      { label: "Parcela", x: 172, align: "right", get: (c) => (c.parcela_atual && c.total_parcelas ? `${c.parcela_atual}/${c.total_parcelas}` : "") },
+      { label: "Parcela", x: 172, align: "right", get: (c) => (c.parcela_atual && c.total_parcelas ? `${isNova(c) ? "Novo  " : ""}${c.parcela_atual}/${c.total_parcelas}` : "") },
       status
     ]);
     section("Mensais", mensais, [desc, valor, status]);
-    section("À vista", avulsas, [
+    section("Avulsos", avulsas, [
       { label: "Data", x: L + 2, get: (c) => fmtDate(c.data_compra || c.vencimento) || "-" },
       { label: "Descrição", x: L + 20, get: (c) => c.descricao, max: 85 },
       valor, status
