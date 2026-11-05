@@ -7,7 +7,7 @@
   });
 
   const MAX_FILE_MB = 10;
-  const ORIGENS_PADRAO = ["Cartão de crédito", "Pix", "Boleto", "Débito automático", "Dinheiro", "Transferência"];
+  const LS = { origem: "contas.origemFiltro", lastOrigem: "contas.ultimaOrigem", lastTipo: "contas.ultimoTipo", pdf: "contas.pdfOrigem" };
 
   // ---------------------------------------------------------------- estado
   const state = {
@@ -15,15 +15,20 @@
     month: currentMonthKey(),   // "AAAA-MM"
     contas: [],
     filter: "todas",
-    origem: "",                 // filtro de origem ("" = todas)
+    origem: lsGet(LS.origem),   // filtro de origem ("" = todas)
+    busca: "",
     editing: null,              // conta em edição (ou null)
-    removeNota: false
+    removeNota: false,
+    origemTocada: false,        // usuário escolheu a origem à mão neste formulário
+    hist: { origens: [], porDescricao: new Map(), descricoes: [] }
   };
 
   // ---------------------------------------------------------------- utilitários
   const $ = (sel) => document.querySelector(sel);
   const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
+  function lsGet(k) { try { return localStorage.getItem(k) || ""; } catch { return ""; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, v || ""); } catch {} }
   function pad(n) { return String(n).padStart(2, "0"); }
   function todayStr() {
     const d = new Date();
@@ -63,6 +68,9 @@
   function valorToInput(n) {
     return Number(n).toFixed(2).replace(".", ",");
   }
+  function norm(s) {
+    return String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+  }
   function esc(s) {
     return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
@@ -90,7 +98,7 @@
   async function init() {
     const { data } = await sb.auth.getSession();
     setUser(data.session?.user || null);
-    sb.auth.onAuthStateChange((_event, session) => setUser(session?.user || null));
+    sb.auth.onAuthStateChange((_event, session) => setTimeout(() => setUser(session?.user || null), 0));
   }
 
   function setUser(user) {
@@ -98,7 +106,7 @@
     state.user = user;
     $("#view-login").hidden = !!user;
     $("#view-app").hidden = !user;
-    if (user && changed) loadMonth();
+    if (user && changed) { loadMonth(); loadHistory(); }
     if (!user) { state.contas = []; render(); }
   }
 
@@ -131,10 +139,33 @@
       .from("contas")
       .select("*")
       .eq("mes_referencia", monthToDb(state.month))
-      .order("vencimento", { ascending: true, nullsFirst: false })
       .order("descricao", { ascending: true });
     if (error) { toast(friendlyError(error)); return; }
     state.contas = data || [];
+    render();
+  }
+
+  // histórico para sugestões: origens mais usadas e o último lançamento de cada descrição
+  async function loadHistory() {
+    const { data, error } = await sb
+      .from("contas")
+      .select("descricao, valor, tipo, origem, total_parcelas, created_at, mes_referencia")
+      .order("mes_referencia", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(3000);
+    if (error || !data) return;
+    const freq = new Map();
+    const porDescricao = new Map();
+    for (const c of data) {
+      if (c.origem) freq.set(c.origem, (freq.get(c.origem) || 0) + 1);
+      const k = norm(c.descricao);
+      if (k && !porDescricao.has(k)) porDescricao.set(k, c);
+    }
+    state.hist.origens = [...freq.entries()].sort((a, b) => b[1] - a[1]).map(([o]) => o);
+    state.hist.porDescricao = porDescricao;
+    state.hist.descricoes = [...porDescricao.values()].map((c) => c.descricao);
+    $("#descricoes").innerHTML = state.hist.descricoes.map((d) => `<option value="${esc(d)}">`).join("");
+    $("#origens").innerHTML = state.hist.origens.map((o) => `<option value="${esc(o)}">`).join("");
     render();
   }
 
@@ -142,51 +173,76 @@
     return !c.pago && c.vencimento && c.vencimento < todayStr();
   }
 
+  function origensDisponiveis() {
+    const set = new Set(state.hist.origens);
+    state.contas.forEach((c) => c.origem && set.add(c.origem));
+    const lista = [...set];
+    if (state.origem && !set.has(state.origem)) lista.unshift(state.origem);
+    return lista;
+  }
+
+  function renderOrigemTabs() {
+    const lista = origensDisponiveis();
+    const noMes = new Set(state.contas.map((c) => c.origem).filter(Boolean));
+    // origens com contas neste mês primeiro, depois as demais
+    lista.sort((a, b) => Number(noMes.has(b)) - Number(noMes.has(a)));
+    const tabs = [["", "Todas"], ...lista.map((o) => [o, o])];
+    $("#origem-tabs").innerHTML = tabs.map(([v, label]) =>
+      `<button type="button" class="chip${state.origem === v ? " active" : ""}${v && !noMes.has(v) ? " dim" : ""}" data-origem="${esc(v)}">${esc(label)}</button>`
+    ).join("");
+  }
+
+  const GRUPOS = [
+    { titulo: "Parceladas", tipos: ["parcelado"] },
+    { titulo: "Mensais", tipos: ["mensal"] },
+    { titulo: "À vista", tipos: ["avista", "avulso"] }
+  ];
+
   function render() {
-    const list = $("#list");
+    renderOrigemTabs();
     const doMes = state.contas;
     const all = state.origem ? doMes.filter((c) => (c.origem || "") === state.origem) : doMes;
 
     const total = all.reduce((s, c) => s + Number(c.valor), 0);
     const pago = all.filter((c) => c.pago).reduce((s, c) => s + Number(c.valor), 0);
+    $("#sum-label").textContent = state.origem ? `Total · ${state.origem}` : "Total do mês";
     $("#sum-total").textContent = brl.format(total);
     $("#sum-paid").textContent = brl.format(pago);
     $("#sum-open").textContent = brl.format(total - pago);
     $("#progress-bar").style.width = total > 0 ? `${Math.round((pago / total) * 100)}%` : "0%";
 
     let rows = all;
-    if (state.filter === "abertas") rows = all.filter((c) => !c.pago);
-    if (state.filter === "pagas") rows = all.filter((c) => c.pago);
-    // não pagas primeiro, depois pagas
-    rows = [...rows].sort((a, b) => Number(a.pago) - Number(b.pago));
+    if (state.filter === "abertas") rows = rows.filter((c) => !c.pago);
+    if (state.filter === "pagas") rows = rows.filter((c) => c.pago);
+    if (state.busca) { const q = norm(state.busca); rows = rows.filter((c) => norm(c.descricao).includes(q)); }
+
+    const ordem = (a, b) =>
+      Number(a.pago) - Number(b.pago) ||
+      (a.data_compra || a.vencimento || "9").localeCompare(b.data_compra || b.vencimento || "9") ||
+      a.descricao.localeCompare(b.descricao, "pt-BR");
 
     $("#empty").hidden = doMes.length > 0;
+    const list = $("#list");
     if (all.length > 0 && rows.length === 0) {
-      list.innerHTML = `<li class="empty">Nada por aqui neste filtro.</li>`;
-    } else {
-      list.innerHTML = rows.map(itemHtml).join("");
+      list.innerHTML = `<p class="empty">Nada por aqui neste filtro.</p>`;
+      return;
     }
-
-    // sugestões de origem
-    const origens = new Set(ORIGENS_PADRAO);
-    doMes.forEach((c) => c.origem && origens.add(c.origem));
-    $("#origens").innerHTML = [...origens].map((o) => `<option value="${esc(o)}">`).join("");
-
-    // filtro de origem (só as que existem no mês, mais a selecionada)
-    const usadas = [...new Set(doMes.map((c) => c.origem).filter(Boolean))].sort((a, b) => a.localeCompare(b, "pt-BR"));
-    if (state.origem && !usadas.includes(state.origem)) usadas.unshift(state.origem);
-    const sel = $("#origem-filter");
-    sel.innerHTML = `<option value="">Todas as origens</option>` +
-      usadas.map((o) => `<option value="${esc(o)}">${esc(o)}</option>`).join("");
-    sel.value = state.origem;
-    sel.classList.toggle("active", !!state.origem);
+    list.innerHTML = GRUPOS.map((g) => {
+      const itens = rows.filter((c) => g.tipos.includes(c.tipo)).sort(ordem);
+      if (!itens.length) return "";
+      const sub = itens.reduce((s, c) => s + Number(c.valor), 0);
+      return `<section class="grupo">
+        <h3 class="grupo-head"><span>${g.titulo} <small>${itens.length}</small></span><span>${brl.format(sub)}</span></h3>
+        <ul class="list-ul">${itens.map(itemHtml).join("")}</ul>
+      </section>`;
+    }).join("");
   }
 
   const TIPO_LABEL = { avista: "À vista", parcelado: "Parcelado", mensal: "Mensal", avulso: "Avulso" };
 
   function itemHtml(c) {
     const meta = [];
-    if (c.data_compra) meta.push(`<span>Compra ${fmtDate(c.data_compra)}</span>`);
+    if (c.data_compra) meta.push(`<span>${fmtDate(c.data_compra)}</span>`);
     if (c.vencimento) {
       meta.push(isOverdue(c)
         ? `<span class="badge late">Venceu ${fmtDate(c.vencimento)}</span>`
@@ -194,10 +250,10 @@
     }
     if (c.tipo === "parcelado" && c.parcela_atual && c.total_parcelas) {
       meta.push(`<span class="badge parcelado">${c.parcela_atual}/${c.total_parcelas}</span>`);
-    } else {
-      meta.push(`<span class="badge ${c.tipo}">${TIPO_LABEL[c.tipo] || c.tipo}</span>`);
+    } else if (c.tipo === "avulso") {
+      meta.push(`<span class="badge">${TIPO_LABEL.avulso}</span>`);
     }
-    if (c.origem) meta.push(`<span>${esc(c.origem)}</span>`);
+    if (c.origem && !state.origem) meta.push(`<span>${esc(c.origem)}</span>`);
     if (c.nota_path) meta.push(`<span title="Tem nota fiscal">📎</span>`);
 
     const cls = ["card", "item", c.pago ? "paid" : "", isOverdue(c) ? "overdue" : ""].join(" ");
@@ -224,14 +280,14 @@
 
   async function togglePago(conta) {
     const pago = !conta.pago;
-    const patch = { pago, data_pagamento: pago ? (conta.data_pagamento || todayStr()) : null };
+    const patch = { pago, data_pagamento: pago ? todayStr() : null };
     Object.assign(conta, patch);       // atualiza na hora
     render();
     const { error } = await sb.from("contas").update(patch).eq("id", conta.id);
     if (error) { toast(friendlyError(error)); loadMonth(); }
   }
 
-  // ---------------------------------------------------------------- navegação de mês
+  // ---------------------------------------------------------------- navegação e filtros
   $("#prev-month").addEventListener("click", () => { state.month = shiftMonthKey(state.month, -1); loadMonth(); });
   $("#next-month").addEventListener("click", () => { state.month = shiftMonthKey(state.month, 1); loadMonth(); });
   $("#month-label").addEventListener("click", () => {
@@ -246,13 +302,20 @@
     if (e.target.value) { state.month = e.target.value; loadMonth(); }
   });
 
-  $("#origem-filter").addEventListener("change", (e) => { state.origem = e.target.value; render(); });
+  $("#origem-tabs").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-origem]");
+    if (!b) return;
+    state.origem = b.dataset.origem;
+    lsSet(LS.origem, state.origem);
+    render();
+  });
 
-  document.querySelectorAll(".chip").forEach((chip) => chip.addEventListener("click", () => {
-    document.querySelectorAll(".chip").forEach((c) => c.classList.toggle("active", c === chip));
+  document.querySelectorAll(".filters .chip").forEach((chip) => chip.addEventListener("click", () => {
+    document.querySelectorAll(".filters .chip").forEach((c) => c.classList.toggle("active", c === chip));
     state.filter = chip.dataset.filter;
     render();
   }));
+  $("#busca").addEventListener("input", (e) => { state.busca = e.target.value; render(); });
 
   // ---------------------------------------------------------------- menu
   function closeMenu() { $("#menu").hidden = true; }
@@ -265,17 +328,19 @@
     const { data, error } = await sb.from("contas").select("*")
       .eq("mes_referencia", monthToDb(prev)).eq("tipo", "mensal");
     if (error) { toast(friendlyError(error)); return; }
-    const existentes = new Set(state.contas.map((c) => c.descricao.trim().toLowerCase()));
+    const existentes = new Set(state.contas.map((c) => norm(c.descricao)));
     const novas = (data || [])
-      .filter((c) => !existentes.has(c.descricao.trim().toLowerCase()))
+      .filter((c) => !existentes.has(norm(c.descricao)))
       .map((c) => ({
-        descricao: c.descricao, valor: c.valor, tipo: "mensal", origem: c.origem, observacao: c.observacao,
+        descricao: c.descricao, valor: c.valor, tipo: "mensal", origem: c.origem, observacao: null,
         mes_referencia: monthToDb(state.month),
         vencimento: addMonthsDate(c.vencimento, 1),
         data_compra: null,
         pago: false
       }));
     if (!novas.length) { toast("Nenhuma conta mensal nova para trazer."); return; }
+    const nomes = novas.map((c) => `• ${c.descricao} (${brl.format(Number(c.valor))})`).join("\n");
+    if (!confirm(`Lançar em ${monthLabel(state.month)} estas contas mensais de ${monthLabel(prev)}?\n\n${nomes}`)) return;
     const { error: e2 } = await sb.from("contas").insert(novas);
     if (e2) { toast(friendlyError(e2)); return; }
     toast(`${novas.length} conta(s) mensal(is) lançada(s).`);
@@ -292,7 +357,8 @@
       const s = String(v);
       return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
-    const lines = [cols.join(";")].concat(state.contas.map((c) => cols.map((k) => cell(k === "valor" ? Number(c[k]) : c[k])).join(";")));
+    const rows = state.origem ? state.contas.filter((c) => c.origem === state.origem) : state.contas;
+    const lines = [cols.join(";")].concat(rows.map((c) => cols.map((k) => cell(k === "valor" ? Number(c[k]) : c[k])).join(";")));
     const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -305,47 +371,95 @@
   const dlg = $("#form-dialog");
   const form = $("#conta-form");
 
-  function syncTipoFields() {
-    const parcelado = form.tipo.value === "parcelado";
+  function setTipo(tipo) {
+    form.tipo.value = tipo;
+    document.querySelectorAll("#tipo-seg button").forEach((b) => b.classList.toggle("active", b.dataset.tipo === tipo));
+    const parcelado = tipo === "parcelado";
     $("#parcelas-row").hidden = !parcelado;
     $("#gerar-row").hidden = !parcelado || !!state.editing;
+    if (parcelado && !form.parcela_atual.value) form.parcela_atual.value = 1;
   }
-  form.tipo.addEventListener("change", syncTipoFields);
-  form.pago.addEventListener("change", () => {
-    if (form.pago.checked && !form.data_pagamento.value) form.data_pagamento.value = todayStr();
-    if (!form.pago.checked) form.data_pagamento.value = "";
+  $("#tipo-seg").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-tipo]");
+    if (b) setTipo(b.dataset.tipo);
   });
 
-  function openForm(conta = null) {
+  function renderOrigemChips() {
+    const top = state.hist.origens.slice(0, 8);
+    const atual = form.origem.value.trim();
+    if (atual && !top.includes(atual)) top.unshift(atual);
+    $("#origem-chips").innerHTML = top.map((o) =>
+      `<button type="button" class="chip${o === atual ? " active" : ""}" data-origem="${esc(o)}">${esc(o)}</button>`
+    ).join("") || `<span class="muted small">As origens que você usar aparecem aqui.</span>`;
+  }
+  $("#origem-chips").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-origem]");
+    if (!b) return;
+    form.origem.value = form.origem.value === b.dataset.origem ? "" : b.dataset.origem;
+    state.origemTocada = true;
+    renderOrigemChips();
+  });
+  form.origem.addEventListener("input", () => { state.origemTocada = true; renderOrigemChips(); });
+
+  // ao escolher uma descrição já usada, completa o resto com o último lançamento dela
+  function autoPreencher() {
+    if (state.editing) return;
+    const ult = state.hist.porDescricao.get(norm(form.descricao.value));
+    if (!ult) return;
+    if (!form.valor.value) form.valor.value = valorToInput(ult.valor);
+    if (ult.origem && !state.origemTocada) { form.origem.value = ult.origem; renderOrigemChips(); }
+    setTipo(ult.tipo);
+    if (ult.tipo === "parcelado" && ult.total_parcelas && !form.total_parcelas.value) form.total_parcelas.value = ult.total_parcelas;
+  }
+  form.descricao.addEventListener("change", autoPreencher);
+  form.descricao.addEventListener("input", () => {
+    // escolha pela lista de sugestões dispara "input" com o texto completo
+    if (state.hist.porDescricao.has(norm(form.descricao.value))) autoPreencher();
+  });
+
+  form.nota.addEventListener("change", () => {
+    const f = form.nota.files[0];
+    $("#nota-label").textContent = f ? `📎 ${f.name}` : "📎 Anexar nota fiscal";
+  });
+
+  function openForm(conta = null, manter = null) {
     state.editing = conta;
     state.removeNota = false;
+    state.origemTocada = false;
     form.reset();
+    $("#nota-label").textContent = "📎 Anexar nota fiscal";
     $("#form-error").hidden = true;
     $("#form-title").textContent = conta ? "Editar conta" : "Nova conta";
     $("#form-delete").hidden = !conta;
+    $("#form-save-next").hidden = !!conta;
+    $("#mais-opcoes").open = false;
 
     if (conta) {
       form.descricao.value = conta.descricao;
       form.valor.value = valorToInput(conta.valor);
       form.vencimento.value = conta.vencimento || "";
       form.data_compra.value = conta.data_compra || "";
-      form.tipo.value = conta.tipo;
       form.mes_referencia.value = conta.mes_referencia.slice(0, 7);
       form.parcela_atual.value = conta.parcela_atual || "";
       form.total_parcelas.value = conta.total_parcelas || "";
       form.origem.value = conta.origem || "";
       form.pago.checked = conta.pago;
-      form.data_pagamento.value = conta.data_pagamento || "";
       form.observacao.value = conta.observacao || "";
+      state.origemTocada = true;
+      setTipo(conta.tipo);
+      if (conta.vencimento || conta.observacao || conta.mes_referencia.slice(0, 7) !== state.month) $("#mais-opcoes").open = true;
     } else {
-      form.tipo.value = "avista";
-      form.mes_referencia.value = state.month;
-      form.parcela_atual.value = 1;
+      // padrões: origem do filtro ou a última usada, tipo da última conta, data de hoje, mês aberto
+      form.origem.value = manter?.origem ?? (state.origem || lsGet(LS.lastOrigem));
+      form.data_compra.value = manter?.data_compra || todayStr();
+      form.mes_referencia.value = manter?.mes || state.month;
+      setTipo(manter?.tipo || lsGet(LS.lastTipo) || "avista");
+      if (form.tipo.value === "parcelado") form.total_parcelas.value = "";
     }
     $("#nota-atual").hidden = !(conta && conta.nota_path);
-    syncTipoFields();
-    dlg.showModal();
-    if (!conta) setTimeout(() => form.descricao.focus(), 50);
+    renderOrigemChips();
+    if (!dlg.open) dlg.showModal();
+    if (!conta) setTimeout(() => form.valor.focus(), 60);
   }
 
   $("#add-btn").addEventListener("click", () => openForm(null));
@@ -365,14 +479,17 @@
     el.hidden = false;
   }
 
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
+  async function salvar(lancarOutra) {
     $("#form-error").hidden = true;
 
     const valor = parseValor(form.valor.value);
     if (!Number.isFinite(valor) || valor <= 0) return formError("Informe um valor válido, por exemplo 150,90.");
+    if (!form.descricao.value.trim()) return formError("Informe a descrição.");
+    if (!form.mes_referencia.value) return formError("Informe o mês de referência em Mais opções.");
 
     const tipo = form.tipo.value;
+    const ed = state.editing;
+    const pago = form.pago.checked;
     const base = {
       descricao: form.descricao.value.trim(),
       valor,
@@ -383,8 +500,9 @@
       parcela_atual: tipo === "parcelado" ? (parseInt(form.parcela_atual.value, 10) || null) : null,
       total_parcelas: tipo === "parcelado" ? (parseInt(form.total_parcelas.value, 10) || null) : null,
       origem: form.origem.value.trim() || null,
-      pago: form.pago.checked,
-      data_pagamento: form.pago.checked ? (form.data_pagamento.value || todayStr()) : null,
+      pago,
+      // data do pagamento: automática ao marcar como pago (mantém a anterior se já estava pago)
+      data_pagamento: pago ? ((ed && ed.pago && ed.data_pagamento) || todayStr()) : null,
       observacao: form.observacao.value.trim() || null
     };
     if (tipo === "parcelado") {
@@ -395,13 +513,14 @@
     const file = form.nota.files[0] || null;
     if (file && file.size > MAX_FILE_MB * 1024 * 1024) return formError(`O arquivo passa de ${MAX_FILE_MB} MB.`);
 
-    const saveBtn = $("#form-save");
-    saveBtn.disabled = true;
-    saveBtn.textContent = "Salvando...";
+    const btns = [$("#form-save"), $("#form-save-next")];
+    btns.forEach((b) => (b.disabled = true));
+    $("#form-save").textContent = "Salvando...";
     try {
       let conta;
-      if (state.editing) {
-        const { data, error } = await sb.from("contas").update(base).eq("id", state.editing.id).select().single();
+      let qtd = 1;
+      if (ed) {
+        const { data, error } = await sb.from("contas").update(base).eq("id", ed.id).select().single();
         if (error) throw error;
         conta = data;
       } else {
@@ -421,11 +540,13 @@
         const { data, error } = await sb.from("contas").insert(rows).select();
         if (error) throw error;
         conta = data[0];
-        if (rows.length > 1) toast(`${rows.length} parcelas lançadas.`);
+        qtd = rows.length;
+        lsSet(LS.lastOrigem, base.origem);
+        lsSet(LS.lastTipo, tipo);
       }
 
       // nota fiscal
-      const oldPath = state.editing?.nota_path || null;
+      const oldPath = ed?.nota_path || null;
       if (file) {
         const path = `${state.user.id}/${conta.id}/${Date.now()}_${safeFileName(file.name)}`;
         const { error: upErr } = await sb.storage.from(CFG.bucket).upload(path, file, {
@@ -440,19 +561,26 @@
         await sb.from("contas").update({ nota_path: null }).eq("id", conta.id);
       }
 
-      dlg.close();
-      // se lançou em outro mês, vai para ele
+      toast(qtd > 1 ? `${qtd} parcelas lançadas.` : (ed ? "Alterado." : "Lançado."));
       const mes = base.mes_referencia.slice(0, 7);
-      if (mes !== state.month) state.month = mes;
+      if (lancarOutra) {
+        openForm(null, { origem: base.origem || "", tipo, data_compra: base.data_compra, mes });
+      } else {
+        dlg.close();
+        if (mes !== state.month) state.month = mes;
+      }
       await loadMonth();
-      if (!toastTimer || $("#toast").hidden) toast("Salvo.");
+      loadHistory();
     } catch (err) {
       formError(friendlyError(err));
     } finally {
-      saveBtn.disabled = false;
-      saveBtn.textContent = "Salvar";
+      btns.forEach((b) => (b.disabled = false));
+      $("#form-save").textContent = "Salvar";
     }
-  });
+  }
+
+  form.addEventListener("submit", (e) => { e.preventDefault(); salvar(false); });
+  $("#form-save-next").addEventListener("click", () => salvar(true));
 
   $("#form-delete").addEventListener("click", async () => {
     const c = state.editing;
@@ -479,7 +607,6 @@
   // ---------------------------------------------------------------- PDF para enviar
   const pdfDlg = $("#pdf-dialog");
   const pdfForm = $("#pdf-form");
-  const PDF_ORIGEM_KEY = "contas.pdfOrigem";
 
   function pdfRows() {
     const origem = pdfForm.origem.value;
@@ -496,8 +623,7 @@
   $("#open-pdf").addEventListener("click", () => {
     closeMenu();
     const origens = [...new Set(state.contas.map((c) => c.origem).filter(Boolean))].sort((a, b) => a.localeCompare(b, "pt-BR"));
-    let saved = "";
-    try { saved = localStorage.getItem(PDF_ORIGEM_KEY) || ""; } catch {}
+    const saved = lsGet(LS.pdf);
     const sel = $("#pdf-origem");
     sel.innerHTML = `<option value="">Todas as origens</option>` +
       origens.map((o) => `<option value="${esc(o)}">${esc(o)}</option>`).join("");
@@ -585,7 +711,7 @@
       status
     ]);
     section("Mensais", mensais, [desc, valor, status]);
-    section("Compras", avulsas, [
+    section("À vista", avulsas, [
       { label: "Data", x: L + 2, get: (c) => fmtDate(c.data_compra || c.vencimento) || "-" },
       { label: "Descrição", x: L + 20, get: (c) => c.descricao, max: 85 },
       valor, status
@@ -610,7 +736,7 @@
     btn.disabled = true; btn.textContent = "Gerando...";
     try {
       const origem = pdfForm.origem.value;
-      try { localStorage.setItem(PDF_ORIGEM_KEY, origem); } catch {}
+      lsSet(LS.pdf, origem);
       const { jsPDF } = await loadJsPdf();
       const doc = buildPdf(jsPDF, rows, origem);
       const slug = (origem ? "_" + safeFileName(origem) : "");

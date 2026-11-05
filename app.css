@@ -147,7 +147,28 @@ label { display: grid; gap: 6px; font-size: 13px; color: var(--muted); font-weig
 }
 .chip.active { background: var(--text); color: var(--bg); border-color: var(--text); }
 
-.list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.list { display: grid; gap: 14px; }
+.list-ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.grupo-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin: 0 4px 8px; font-size: 13px; font-weight: 800; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .04em; font-variant-numeric: tabular-nums;
+}
+.grupo-head small { font-weight: 600; opacity: .8; margin-left: 4px; }
+
+/* ---------- filtro de origem ---------- */
+.origem-bar { display: grid; gap: 6px; margin-bottom: 12px; }
+.chips-scroll {
+  display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 4px;
+  scrollbar-width: none; -webkit-overflow-scrolling: touch;
+}
+.chips-scroll::-webkit-scrollbar { display: none; }
+.chips-scroll .chip { flex: 0 0 auto; white-space: nowrap; }
+.chip.dim:not(.active) { opacity: .55; }
+.search {
+  flex: 1 1 120px; min-width: 0; width: auto; min-height: 38px;
+  padding: 6px 14px; border-radius: 99px; background: var(--surface); font-size: 14px;
+}
 .item {
   display: grid; grid-template-columns: 44px 1fr auto; align-items: center; gap: 10px;
   padding: 10px 12px 10px 6px;
@@ -193,13 +214,50 @@ label { display: grid; gap: 6px; font-size: 13px; color: var(--muted); font-weig
 .sheet-head { display: flex; align-items: center; justify-content: space-between; }
 .sheet-head h2 { margin: 0; font-size: 20px; }
 .sheet-foot { display: flex; gap: 10px; justify-content: flex-end; position: sticky; bottom: 0; background: var(--surface); padding-top: 6px; }
-.sheet-foot .primary { flex: 1; }
+.sheet-foot { flex-wrap: wrap; }
+.sheet-foot .primary { flex: 1 1 120px; }
+#form-save-next { flex: 1 1 150px; }
 .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: end; }
 .check { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--text); font-weight: 600; }
 .check input { width: 22px; height: 22px; min-height: 0; accent-color: var(--accent); }
 .check.inline { min-height: 44px; }
-.nota-box { display: grid; gap: 8px; padding: 12px; border: 1px dashed var(--border); border-radius: 12px; }
-.nota-atual { display: flex; gap: 16px; }
+.nota-box { display: grid; gap: 8px; }
+.nota-atual { display: flex; gap: 16px; align-items: center; font-size: 14px; }
+.file-btn {
+  display: flex; align-items: center; justify-content: center; min-height: 44px;
+  border: 1px dashed var(--border); border-radius: 12px; color: var(--text);
+  font-size: 14px; font-weight: 600; cursor: pointer; position: relative; overflow: hidden;
+}
+.file-btn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; min-height: 0; }
+
+/* ---------- lançamento rápido ---------- */
+.valor-row {
+  display: flex; align-items: center; gap: 8px; padding: 6px 14px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 14px;
+}
+.valor-row:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+.valor-row .cur { font-size: 22px; font-weight: 700; color: var(--muted); }
+.valor-input {
+  border: 0; background: transparent; padding: 6px 0; font-size: 30px; font-weight: 800;
+  font-variant-numeric: tabular-nums; min-height: 52px;
+}
+.valor-input:focus { outline: none; }
+.field { display: grid; gap: 8px; }
+.flabel { font-size: 13px; color: var(--muted); font-weight: 600; }
+.seg { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 4px; background: var(--surface-2); border-radius: 12px; }
+.seg button {
+  border: 0; background: transparent; border-radius: 9px; min-height: 38px;
+  font-size: 13px; font-weight: 700; color: var(--muted); padding: 0 4px;
+}
+.seg button.active { background: var(--surface); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+.more { border-top: 1px solid var(--border); padding-top: 10px; }
+.more summary { cursor: pointer; font-size: 14px; font-weight: 700; color: var(--accent); list-style: none; }
+.more summary::-webkit-details-marker { display: none; }
+.more summary::before { content: "＋ "; }
+.more[open] summary::before { content: "－ "; }
+.more-body { display: grid; gap: 14px; margin-top: 12px; }
+.pago-check { align-self: end; }
+.small { font-size: 13px; }
 
 .toast {
   position: fixed; left: 50%; transform: translateX(-50%);

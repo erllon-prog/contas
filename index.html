@@ -14,7 +14,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="app.css">
+  <link rel="stylesheet" href="app.css?v=3">
 </head>
 <body>
   <!-- LOGIN -->
@@ -52,9 +52,14 @@
     </div>
 
     <main class="content">
+      <div class="origem-bar">
+        <span class="stat-label">Origem</span>
+        <div id="origem-tabs" class="chips-scroll" role="tablist" aria-label="Filtrar por origem"></div>
+      </div>
+
       <section class="summary">
         <div class="card stat">
-          <span class="stat-label">Total do mês</span>
+          <span class="stat-label" id="sum-label">Total do mês</span>
           <strong id="sum-total">R$ 0,00</strong>
         </div>
         <div class="card stat">
@@ -69,16 +74,14 @@
 
       <div class="progress" aria-hidden="true"><div id="progress-bar"></div></div>
 
-      <nav class="filters" role="tablist">
+      <nav class="filters">
         <button data-filter="todas" class="chip active">Todas</button>
         <button data-filter="abertas" class="chip">A pagar</button>
         <button data-filter="pagas" class="chip">Pagas</button>
-        <select id="origem-filter" class="chip-select" aria-label="Filtrar por origem">
-          <option value="">Todas as origens</option>
-        </select>
+        <input id="busca" class="search" type="search" placeholder="Buscar" aria-label="Buscar descrição" autocomplete="off">
       </nav>
 
-      <ul id="list" class="list"></ul>
+      <div id="list" class="list"></div>
       <p id="empty" class="empty" hidden>Nenhuma conta neste mês. Toque em <b>+</b> para lançar.</p>
     </main>
 
@@ -87,41 +90,38 @@
 
   <!-- FORMULÁRIO -->
   <dialog id="form-dialog" class="sheet">
-    <form id="conta-form" method="dialog">
+    <form id="conta-form" method="dialog" autocomplete="off">
       <header class="sheet-head">
         <h2 id="form-title">Nova conta</h2>
         <button type="button" class="icon-btn" id="form-close" aria-label="Fechar">✕</button>
       </header>
 
-      <label>Descrição
-        <input name="descricao" required maxlength="120" placeholder="Ex: Energia, Cartão Nubank, Mercado">
-      </label>
-
-      <div class="row">
-        <label>Valor (R$)
-          <input name="valor" required inputmode="decimal" placeholder="0,00">
-        </label>
-        <label>Vencimento
-          <input name="vencimento" type="date">
-        </label>
+      <div class="valor-row">
+        <span class="cur">R$</span>
+        <input name="valor" class="valor-input" required inputmode="decimal" placeholder="0,00" aria-label="Valor">
       </div>
 
-      <label id="compra-row">Data da compra
-        <input name="data_compra" type="date">
+      <label>Descrição
+        <input name="descricao" list="descricoes" required maxlength="120" placeholder="Ex: Combustível, Mercado">
+        <datalist id="descricoes"></datalist>
       </label>
 
-      <div class="row">
-        <label>Tipo
-          <select name="tipo" required>
-            <option value="avista">À vista</option>
-            <option value="parcelado">Parcelado</option>
-            <option value="mensal">Mensal (fixa)</option>
-            <option value="avulso">Avulso</option>
-          </select>
-        </label>
-        <label>Mês de referência
-          <input name="mes_referencia" type="month" required>
-        </label>
+      <div class="field">
+        <span class="flabel">Origem</span>
+        <div id="origem-chips" class="chips-scroll"></div>
+        <input name="origem" list="origens" maxlength="60" placeholder="Ou digite outra origem">
+        <datalist id="origens"></datalist>
+      </div>
+
+      <div class="field">
+        <span class="flabel">Tipo</span>
+        <div class="seg" id="tipo-seg">
+          <button type="button" data-tipo="avista">À vista</button>
+          <button type="button" data-tipo="parcelado">Parcelado</button>
+          <button type="button" data-tipo="mensal">Mensal</button>
+          <button type="button" data-tipo="avulso">Avulso</button>
+        </div>
+        <input type="hidden" name="tipo" value="avista">
       </div>
 
       <div class="row" id="parcelas-row" hidden>
@@ -137,35 +137,47 @@
         Lançar também as próximas parcelas nos meses seguintes
       </label>
 
-      <label>Origem
-        <input name="origem" list="origens" maxlength="60" placeholder="Cartão, Pix, Boleto, Débito...">
-        <datalist id="origens"></datalist>
-      </label>
-
       <div class="row">
-        <label class="check inline">
-          <input type="checkbox" name="pago"> Pago
+        <label>Data
+          <input name="data_compra" type="date">
         </label>
-        <label>Data do pagamento
-          <input name="data_pagamento" type="date">
+        <label class="check inline pago-check">
+          <input type="checkbox" name="pago"> Já está pago
         </label>
       </div>
 
-      <label>Observação
-        <textarea name="observacao" rows="2" maxlength="500"></textarea>
-      </label>
+      <details class="more" id="mais-opcoes">
+        <summary>Mais opções</summary>
+        <div class="more-body">
+          <div class="row">
+            <label>Mês de referência
+              <input name="mes_referencia" type="month" required>
+            </label>
+            <label>Vencimento
+              <input name="vencimento" type="date">
+            </label>
+          </div>
+          <label>Observação
+            <textarea name="observacao" rows="2" maxlength="500"></textarea>
+          </label>
+        </div>
+      </details>
 
       <div class="nota-box">
-        <span class="stat-label">Nota fiscal / comprovante</span>
         <div id="nota-atual" class="nota-atual" hidden>
-          <button type="button" class="link" id="nota-ver">Ver arquivo</button>
+          <span>📎 Nota anexada</span>
+          <button type="button" class="link" id="nota-ver">Ver</button>
           <button type="button" class="link danger" id="nota-remover">Remover</button>
         </div>
-        <input type="file" name="nota" accept="image/*,application/pdf">
+        <label class="file-btn">
+          <span id="nota-label">📎 Anexar nota fiscal</span>
+          <input type="file" name="nota" accept="image/*,application/pdf">
+        </label>
       </div>
 
       <footer class="sheet-foot">
         <button type="button" class="btn danger-outline" id="form-delete" hidden>Excluir</button>
+        <button type="button" class="btn" id="form-save-next">Salvar e lançar outra</button>
         <button type="submit" class="btn primary" id="form-save">Salvar</button>
       </footer>
       <p id="form-error" class="error" hidden></p>
@@ -197,7 +209,7 @@
   <div id="toast" class="toast" role="status" hidden></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="config.js"></script>
-  <script src="app.js"></script>
+  <script src="config.js?v=3"></script>
+  <script src="app.js?v=3"></script>
 </body>
 </html>
