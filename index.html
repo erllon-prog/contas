@@ -14,7 +14,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="app.css?v=7">
+  <link rel="stylesheet" href="app.css?v=8">
 </head>
 <body>
   <!-- LOGIN -->
@@ -30,6 +30,12 @@
         <input type="password" name="password" autocomplete="current-password" required>
       </label>
       <button type="submit" class="btn primary block">Entrar</button>
+      <div class="ou"><span>ou</span></div>
+      <button type="button" id="google-login" class="btn block google-btn">
+        <svg viewBox="0 0 48 48" width="18" height="18" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.6 5.4 2.7 13.3l7.9 6.1C12.5 13.6 17.8 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.7 6c4.5-4.2 6.9-10.3 6.9-17.7z"/><path fill="#FBBC05" d="M10.6 28.6c-.5-1.4-.8-3-.8-4.6s.3-3.2.8-4.6l-7.9-6.1C1 16.6 0 20.2 0 24s1 7.4 2.7 10.7l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.7-6c-2.1 1.4-4.9 2.3-8.2 2.3-6.2 0-11.5-4.1-13.4-9.9l-7.9 6.1C6.6 42.6 14.6 48 24 48z"/></svg>
+        Entrar com Google
+      </button>
+      <p class="muted small">Com o Google, entra só quem já tem acesso ao app com o mesmo Gmail.</p>
       <p id="login-error" class="error" hidden></p>
     </form>
   </section>
@@ -41,13 +47,14 @@
       <button class="month" id="month-label" aria-label="Escolher mês"></button>
       <button class="icon-btn" id="next-month" aria-label="Próximo mês">›</button>
       <input type="month" id="month-picker" class="sr-only" tabindex="-1">
-      <button class="icon-btn menu-btn" id="menu-btn" aria-label="Menu">⋯</button>
+      <button class="icon-btn menu-btn" id="menu-btn" aria-label="Menu">⋯<span id="menu-dot" class="menu-dot" hidden></span></button>
     </header>
 
     <div id="menu" class="menu" hidden>
       <button id="open-pdf">Gerar PDF do mês para enviar</button>
       <button id="copy-monthly">Trazer contas mensais do mês anterior</button>
       <button id="export-csv">Exportar mês em CSV</button>
+      <button id="open-amigos">Amigos <span id="amigos-badge" class="badge novo" hidden></span></button>
       <button id="open-users" hidden>Usuários e acessos</button>
       <button id="logout" class="danger">Sair</button>
     </div>
@@ -55,8 +62,9 @@
     <main class="content">
       <div id="visao-seg" class="seg seg-2 visao-seg" role="tablist" aria-label="Escolher quais contas ver" hidden>
         <button type="button" data-visao="minhas">Minhas contas</button>
-        <button type="button" data-visao="compartilhadas">Compartilhadas comigo</button>
+        <button type="button" data-visao="receber">A receber</button>
       </div>
+      <button type="button" id="convite-aviso" class="convite-aviso" hidden></button>
       <p id="modo-leitura" class="leitura-tag" hidden></p>
       <div class="origem-bar">
         <span class="stat-label">Origem</span>
@@ -69,11 +77,11 @@
           <strong id="sum-total">R$ 0,00</strong>
         </div>
         <div class="card stat">
-          <span class="stat-label">A pagar</span>
+          <span class="stat-label" id="sum-open-label">A pagar</span>
           <strong id="sum-open" class="warn">R$ 0,00</strong>
         </div>
         <div class="card stat">
-          <span class="stat-label">Pago</span>
+          <span class="stat-label" id="sum-paid-label">Pago</span>
           <strong id="sum-paid" class="ok">R$ 0,00</strong>
         </div>
       </section>
@@ -82,8 +90,8 @@
 
       <nav class="filters">
         <button data-filter="todas" class="chip active">Todas</button>
-        <button data-filter="abertas" class="chip">A pagar</button>
-        <button data-filter="pagas" class="chip">Pagas</button>
+        <button data-filter="abertas" class="chip" id="filtro-abertas">A pagar</button>
+        <button data-filter="pagas" class="chip" id="filtro-pagas">Pagas</button>
         <input id="busca" class="search" type="search" placeholder="Buscar" aria-label="Buscar descrição" autocomplete="off">
       </nav>
 
@@ -115,8 +123,9 @@
       <div class="field">
         <span class="flabel">Origem</span>
         <div id="origem-chips" class="chips-scroll"></div>
-        <input name="origem" list="origens" maxlength="60" placeholder="Ou digite outra origem">
+        <input name="origem" list="origens" maxlength="60" placeholder="Ou digite outra origem (@ para um amigo)" autocapitalize="off">
         <datalist id="origens"></datalist>
+        <p id="origem-dica" class="origem-dica" hidden></p>
       </div>
 
       <div class="field">
@@ -196,7 +205,7 @@
         <h2>Usuários e acessos</h2>
         <button type="button" class="icon-btn" id="users-close" aria-label="Fechar">✕</button>
       </header>
-      <p class="muted small">Cada pessoa pode ter as próprias contas, que só ela vê e controla, e pode ver em modo somente leitura as suas contas das origens marcadas, com as notas fiscais.</p>
+      <p class="muted small">Cada pessoa entra com o próprio e-mail e senha. Com "Controla as próprias contas", ela lança e controla as contas dela, que só ela vê. Para ela ver uma conta sua, vocês precisam ser amigos no app: aí é só escrever o @ dela na origem.</p>
       <div id="users-list" class="users-list"></div>
       <form id="user-form" class="user-new" autocomplete="off">
         <h3>Novo usuário</h3>
@@ -210,15 +219,47 @@
           <input name="senha" type="text" minlength="8" required autocomplete="new-password" placeholder="Mínimo 8 caracteres">
         </label>
         <label class="check">
-          <input type="checkbox" name="proprias"> Controla as próprias contas
+          <input type="checkbox" name="proprias" checked> Controla as próprias contas
         </label>
-        <div class="field">
-          <span class="flabel">Pode ver das suas origens (somente leitura)</span>
-          <div class="chips-wrap" id="user-origens"></div>
-        </div>
+        <label class="check">
+          <input type="checkbox" name="convidar" checked> Enviar convite de amizade para essa pessoa
+        </label>
         <button type="submit" class="btn primary block" id="user-create">Criar usuário</button>
         <p id="user-error" class="error" hidden></p>
       </form>
+    </div>
+  </dialog>
+
+  <!-- AMIGOS -->
+  <dialog id="amigos-dialog" class="sheet">
+    <div class="sheet-body">
+      <header class="sheet-head">
+        <h2>Amigos</h2>
+        <button type="button" class="icon-btn" id="amigos-close" aria-label="Fechar">✕</button>
+      </header>
+      <p class="muted small">Na origem de uma conta, escreva o @ de um amigo (ex.: <b>@josi</b>) para ele acompanhar essa conta em <b>A receber</b>, sem poder alterar. Origem sem @ só você vê.</p>
+
+      <form id="apelido-form" class="amigos-bloco" autocomplete="off">
+        <span class="flabel">Seu @</span>
+        <div class="inline-form">
+          <span class="arroba">@</span>
+          <input name="apelido" maxlength="21" autocapitalize="off" spellcheck="false" aria-label="Seu apelido">
+          <button type="submit" class="btn">Salvar</button>
+        </div>
+        <p class="muted small">É assim que seus amigos marcam você nas contas.</p>
+      </form>
+
+      <form id="convite-form" class="amigos-bloco" autocomplete="off">
+        <span class="flabel">Convidar um amigo</span>
+        <div class="inline-form">
+          <input name="alvo" maxlength="120" autocapitalize="off" spellcheck="false" placeholder="@apelido ou e-mail" aria-label="Apelido ou e-mail do amigo">
+          <button type="submit" class="btn primary">Convidar</button>
+        </div>
+        <p class="muted small">A pessoa precisa ter acesso ao app e aceitar o convite.</p>
+      </form>
+      <p id="amigos-error" class="error" hidden></p>
+
+      <div id="amigos-lista"></div>
     </div>
   </dialog>
 
@@ -247,7 +288,7 @@
   <div id="toast" class="toast" role="status" hidden></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="config.js?v=7"></script>
-  <script src="app.js?v=7"></script>
+  <script src="config.js?v=8"></script>
+  <script src="app.js?v=8"></script>
 </body>
 </html>
