@@ -1,7 +1,7 @@
 // Service worker: guarda só os arquivos do app (nunca os dados do Supabase).
-const CACHE = "contas-v7";
+const CACHE = "contas-v8";
 const SHELL = [
-  "./", "index.html", "app.css?v=7", "app.js?v=7", "config.js?v=7", "manifest.webmanifest",
+  "./", "index.html", "app.css?v=8", "app.js?v=8", "config.js?v=8", "manifest.webmanifest",
   "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png",
   "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"
 ];
@@ -29,7 +29,7 @@ self.addEventListener("fetch", (e) => {
   e.respondWith(
     fetch(req)
       .then((res) => {
-        if (res.ok) {
+        if (res.ok && !url.search.includes("code=")) {
           const copy = res.clone();
           caches.open(CACHE).then((c) => c.put(req, copy));
         }
