@@ -790,6 +790,12 @@
   const userForm = $("#user-form");
   let usuarios = [];
 
+  function gerarSenha() {
+    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!#%*";
+    const r = crypto.getRandomValues(new Uint32Array(20));
+    return [...r].map((n) => chars[n % chars.length]).join("");
+  }
+
   async function chamarFuncao(body) {
     const { data, error } = await sb.functions.invoke("usuarios", { body });
     if (error) {
@@ -833,19 +839,23 @@
     err.hidden = true;
     const proprias = userForm.proprias.checked;
     const convidar = userForm.convidar.checked;
+    // senha em branco: cria uma aleatória (a pessoa entra com o Google e não precisa dela)
+    const senhaDigitada = userForm.senha.value;
+    const senha = senhaDigitada || gerarSenha();
     const email = userForm.email.value.trim();
     const btn = $("#user-create");
     btn.disabled = true; btn.textContent = "Criando...";
     try {
-      const r = await chamarFuncao({ acao: "criar", nome: userForm.nome.value.trim(), email, senha: userForm.senha.value, origens: [], proprias });
+      const r = await chamarFuncao({ acao: "criar", nome: userForm.nome.value.trim(), email, senha, origens: [], proprias });
       if (proprias && r?.id) {
         const { error } = await sb.from("perfis").update({ controla_proprias: true }).eq("id", r.id);
         if (error) throw new Error("Usuário criado, mas não deu para liberar as contas próprias. Marque a opção no cartão dele e toque em Salvar acesso.");
       }
-      let aviso = "Usuário criado. Passe o e-mail e a senha para a pessoa.";
+      const comoEntra = senhaDigitada ? "Passe o e-mail e a senha para a pessoa." : "Ela entra com o botão do Google, usando esse mesmo e-mail.";
+      let aviso = `Usuário criado. ${comoEntra}`;
       if (convidar) {
         const { error } = await sb.rpc("convidar_amigo", { alvo: email });
-        aviso = error ? `Usuário criado, mas o convite de amizade não foi: ${friendlyError(error)}` : "Usuário criado e convite de amizade enviado. Passe o e-mail e a senha para a pessoa.";
+        aviso = error ? `Usuário criado, mas o convite de amizade não foi: ${friendlyError(error)}` : `Usuário criado e convite de amizade enviado. ${comoEntra}`;
         loadAmigos();
       }
       toast(aviso);
