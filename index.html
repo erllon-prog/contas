@@ -14,7 +14,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="app.css?v=6">
+  <link rel="stylesheet" href="app.css?v=7">
 </head>
 <body>
   <!-- LOGIN -->
@@ -53,6 +53,10 @@
     </div>
 
     <main class="content">
+      <div id="visao-seg" class="seg seg-2 visao-seg" role="tablist" aria-label="Escolher quais contas ver" hidden>
+        <button type="button" data-visao="minhas">Minhas contas</button>
+        <button type="button" data-visao="compartilhadas">Compartilhadas comigo</button>
+      </div>
       <p id="modo-leitura" class="leitura-tag" hidden></p>
       <div class="origem-bar">
         <span class="stat-label">Origem</span>
@@ -192,7 +196,7 @@
         <h2>Usuários e acessos</h2>
         <button type="button" class="icon-btn" id="users-close" aria-label="Fechar">✕</button>
       </header>
-      <p class="muted small">Cada pessoa vê só as contas das origens marcadas, com as notas fiscais, e não consegue alterar nada.</p>
+      <p class="muted small">Cada pessoa pode ter as próprias contas, que só ela vê e controla, e pode ver em modo somente leitura as suas contas das origens marcadas, com as notas fiscais.</p>
       <div id="users-list" class="users-list"></div>
       <form id="user-form" class="user-new" autocomplete="off">
         <h3>Novo usuário</h3>
@@ -205,8 +209,11 @@
         <label>Senha inicial
           <input name="senha" type="text" minlength="8" required autocomplete="new-password" placeholder="Mínimo 8 caracteres">
         </label>
+        <label class="check">
+          <input type="checkbox" name="proprias"> Controla as próprias contas
+        </label>
         <div class="field">
-          <span class="flabel">Pode ver as origens</span>
+          <span class="flabel">Pode ver das suas origens (somente leitura)</span>
           <div class="chips-wrap" id="user-origens"></div>
         </div>
         <button type="submit" class="btn primary block" id="user-create">Criar usuário</button>
@@ -240,7 +247,7 @@
   <div id="toast" class="toast" role="status" hidden></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="config.js?v=6"></script>
-  <script src="app.js?v=6"></script>
+  <script src="config.js?v=7"></script>
+  <script src="app.js?v=7"></script>
 </body>
 </html>
