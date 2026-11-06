@@ -3,7 +3,7 @@
 
   const CFG = window.CONTAS_CONFIG;
   const sb = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseKey, {
-    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false }
+    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, flowType: "pkce" }
   });
 
   const MAX_FILE_MB = 10;
@@ -23,7 +23,8 @@
     origemTocada: false,        // usuário escolheu a origem à mão neste formulário
     hist: { origens: [], porDescricao: new Map(), descricoes: [] },
     perfil: null,               // papel do usuário logado: admin ou leitor
-    visao: "minhas"             // "minhas" = contas da própria pessoa; "compartilhadas" = origens liberadas por outra pessoa
+    visao: "minhas",            // "minhas" = contas da própria pessoa; "receber" = contas em que um amigo marcou a pessoa com @
+    amigos: []                  // amizades e convites (função meus_amigos)
   };
 
   // ---------------------------------------------------------------- utilitários
@@ -116,19 +117,55 @@
   // quem pode ter as próprias contas: o administrador, quem não tem perfil (instalação antiga)
   // e o leitor que o administrador liberou para controlar as próprias contas
   const temProprias = () => !state.perfil || state.perfil.papel === "admin" || !!state.perfil.controla_proprias;
-  // quem recebeu origens de outra pessoa para ver (somente leitura)
-  const temCompartilhadas = () => state.perfil?.papel === "leitor" && (state.perfil.origens || []).length > 0;
-  // edita só nas próprias contas; o que foi compartilhado é sempre somente leitura
+  // amigos com convite aceito: só eles podem ser marcados com @ e só deles vêm contas "A receber"
+  const amigosAceitos = () => state.amigos.filter((a) => a.status === "aceita");
+  const convitesRecebidos = () => state.amigos.filter((a) => a.status === "pendente" && !a.enviado_por_mim);
+  const temReceber = () => amigosAceitos().length > 0;
+  // edita só nas próprias contas; o que um amigo marcou para a pessoa é sempre somente leitura
   const somenteLeitura = () => state.visao !== "minhas" || !temProprias();
+  const nomeAmigo = (id) => { const a = state.amigos.find((x) => x.amigo_id === id); return a ? a.nome : "Amigo"; };
+  const amigoPorApelido = (txt) => {
+    const m = /^@([a-z0-9_.]+)$/i.exec((txt || "").trim());
+    return m ? amigosAceitos().find((a) => a.apelido === m[1].toLowerCase()) || null : undefined;
+  };
 
   async function loadPerfil() {
     const { data } = await sb.from("perfis").select("*").eq("id", state.user.id).maybeSingle();
     state.perfil = data || null;
+    await loadAmigos(false);
+    escolherVisao();
+  }
+  function escolherVisao() {
     const salva = lsGet(`${LS.visao}.${state.user.id}`);
-    if (!temProprias()) state.visao = "compartilhadas";
-    else if (!temCompartilhadas()) state.visao = "minhas";
-    else state.visao = salva === "compartilhadas" ? "compartilhadas" : "minhas";
+    if (!temProprias()) state.visao = "receber";
+    else if (!temReceber()) state.visao = "minhas";
+    else state.visao = salva === "receber" ? "receber" : "minhas";
     aplicarPapel();
+  }
+  async function loadAmigos(redesenhar = true) {
+    if (!state.user) return;
+    const { data, error } = await sb.rpc("meus_amigos");
+    if (error) { state.amigos = []; return; }
+    const antes = JSON.stringify(state.amigos.map((a) => [a.amizade_id, a.status, a.apelido]));
+    state.amigos = data || [];
+    avisoConvites();
+    if (redesenhar && antes !== JSON.stringify(state.amigos.map((a) => [a.amizade_id, a.status, a.apelido]))) {
+      const visaoAntes = state.visao;
+      escolherVisao();
+      if (visaoAntes !== state.visao || state.visao === "receber") loadMonth();
+      if (amigosDlg.open) renderAmigos();
+    }
+  }
+  function avisoConvites() {
+    const n = convitesRecebidos().length;
+    $("#menu-dot").hidden = n === 0;
+    const badge = $("#amigos-badge");
+    badge.hidden = n === 0;
+    badge.textContent = String(n);
+    const aviso = $("#convite-aviso");
+    aviso.hidden = n === 0 || !state.user;
+    if (n === 1) aviso.textContent = `📨 ${convitesRecebidos()[0].nome} quer ser seu amigo no app. Toque para responder.`;
+    else if (n > 1) aviso.textContent = `📨 Você tem ${n} convites de amizade. Toque para responder.`;
   }
   function aplicarPapel() {
     const ro = somenteLeitura();
@@ -136,19 +173,27 @@
     $("#add-btn").hidden = ro;
     $("#copy-monthly").hidden = ro;
     $("#open-users").hidden = state.perfil?.papel !== "admin";
-    const duas = !!state.user && temProprias() && temCompartilhadas();
+    const duas = !!state.user && temProprias() && temReceber();
     $("#visao-seg").hidden = !duas;
     document.querySelectorAll("#visao-seg button").forEach((b) => b.classList.toggle("active", b.dataset.visao === state.visao));
+    const receber = state.visao === "receber";
+    $("#sum-open-label").textContent = receber ? "A receber" : "A pagar";
+    $("#sum-paid-label").textContent = receber ? "Já pago a você" : "Pago";
+    $("#filtro-abertas").textContent = receber ? "A receber" : "A pagar";
+    $("#filtro-pagas").textContent = receber ? "Já pagas" : "Pagas";
+    $("#empty").innerHTML = receber
+      ? (temReceber() ? "Nenhum amigo marcou você em contas deste mês." : "Você ainda não tem amigos no app. Abra <b>⋯ → Amigos</b> para aceitar ou enviar um convite.")
+      : "Nenhuma conta neste mês. Toque em <b>+</b> para lançar.";
     const tag = $("#modo-leitura");
-    tag.hidden = !ro || !state.user;
-    tag.textContent = !ro ? "" : (duas
-      ? "Contas compartilhadas com você, em modo somente leitura."
-      : `Olá, ${state.perfil?.nome || ""}! Você está vendo as contas em modo somente leitura.`);
+    tag.hidden = !receber || !state.user;
+    tag.textContent = !receber ? "" : (duas
+      ? "Contas em que seus amigos marcaram você com @. Só eles podem alterar."
+      : `Olá, ${state.perfil?.nome || ""}! Aqui aparecem as contas em que seus amigos marcaram você. Só eles podem alterar.`);
   }
 
-  // filtra pela visão: as minhas (user_id = eu) ou as que outra pessoa compartilhou
+  // filtra pela visão: as minhas (user_id = eu) ou as que um amigo marcou para mim
   function daVisao(q) {
-    return state.visao === "minhas" ? q.eq("user_id", state.user.id) : q.neq("user_id", state.user.id);
+    return state.visao === "minhas" ? q.eq("user_id", state.user.id) : q.eq("para_usuario", state.user.id);
   }
 
   $("#visao-seg").addEventListener("click", (e) => {
@@ -181,6 +226,29 @@
     f.password.value = "";
   });
 
+  // login com Google: volta para esta mesma página, e o supabase-js troca o código pela sessão
+  $("#google-login").addEventListener("click", async () => {
+    const errEl = $("#login-error");
+    errEl.hidden = true;
+    const { error } = await sb.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: location.origin + location.pathname, queryParams: { prompt: "select_account" } }
+    });
+    if (error) { errEl.textContent = friendlyError(error); errEl.hidden = false; }
+  });
+  // erro devolvido pelo Google/Supabase na volta do login (ex.: e-mail sem acesso ao app)
+  (function erroNaVolta() {
+    const q = new URLSearchParams(location.search + "&" + location.hash.replace(/^#/, ""));
+    const desc = q.get("error_description") || q.get("error");
+    if (!desc) return;
+    const el = $("#login-error");
+    el.textContent = /signup|sign up|not allowed|disabled/i.test(desc)
+      ? "Esse Gmail não tem acesso ao app. Peça para o administrador criar seu usuário com este e-mail."
+      : `Não deu para entrar com o Google: ${desc}`;
+    el.hidden = false;
+    history.replaceState(null, "", location.pathname);
+  })();
+
   $("#logout").addEventListener("click", async () => {
     closeMenu();
     await sb.auth.signOut();
@@ -198,13 +266,14 @@
       .order("descricao", { ascending: true });
     if (visao !== state.visao || mes !== state.month) return; // trocou de visão ou de mês no meio da busca
     if (error) { toast(friendlyError(error)); return; }
-    state.contas = data || [];
+    state.contas = (data || []).map((c) => visao === "receber" ? { ...c, origem_original: c.origem, origem: nomeAmigo(c.user_id) } : c);
     render();
   }
 
   // histórico para sugestões: origens mais usadas e o último lançamento de cada descrição
   async function loadHistory() {
     const visao = state.visao;
+    if (visao !== "minhas") { state.hist = { origens: [], porDescricao: new Map(), descricoes: [] }; return; }
     const { data, error } = await daVisao(sb
       .from("contas")
       .select("descricao, valor, tipo, origem, total_parcelas, created_at, mes_referencia"))
@@ -321,6 +390,7 @@
       meta.push(`<span class="badge parcelado">${c.parcela_atual}/${c.total_parcelas}</span>`);
     }
     if (c.origem && !state.origem) meta.push(`<span>${esc(c.origem)}</span>`);
+    if (c.para_usuario && state.visao === "minhas") meta.push(`<span class="badge visivel" title="${esc(nomeAmigo(c.para_usuario))} acompanha esta conta">👁 ${esc(nomeAmigo(c.para_usuario))}</span>`);
     if (c.nota_path) meta.push(`<span title="Tem nota fiscal">📎</span>`);
 
     const cls = ["card", "item", c.pago ? "paid" : "", isOverdue(c) ? "overdue" : ""].join(" ");
@@ -463,12 +533,33 @@
   });
 
   function renderOrigemChips() {
-    const top = state.hist.origens.slice(0, 8);
     const atual = form.origem.value.trim();
-    if (atual && !top.includes(atual)) top.unshift(atual);
-    $("#origem-chips").innerHTML = top.map((o) =>
-      `<button type="button" class="chip${o === atual ? " active" : ""}" data-origem="${esc(o)}">${esc(o)}</button>`
-    ).join("") || `<span class="muted small">As origens que você usar aparecem aqui.</span>`;
+    const amigos = amigosAceitos().map((a) => "@" + a.apelido);
+    let top;
+    if (atual.startsWith("@")) {
+      // digitando @: mostra só os amigos que combinam
+      const q = atual.slice(1).toLowerCase();
+      top = amigos.filter((o) => o.slice(1).startsWith(q) || norm(nomeAmigo(amigoPorApelido(o)?.amigo_id)).includes(norm(q)));
+    } else {
+      top = state.hist.origens.filter((o) => !o.startsWith("@")).slice(0, 8);
+      amigos.forEach((o) => { if (!top.includes(o)) top.push(o); });
+    }
+    if (atual && atual !== "@" && !top.includes(atual)) top.unshift(atual);
+    $("#origem-chips").innerHTML = top.map((o) => {
+      const amg = o.startsWith("@") ? amigoPorApelido(o) : null;
+      return `<button type="button" class="chip${o === atual ? " active" : ""}${amg ? " amigo" : ""}" data-origem="${esc(o)}"${amg ? ` title="${esc(amg.nome)}"` : ""}>${esc(o)}</button>`;
+    }).join("") || `<span class="muted small">As origens que você usar aparecem aqui.</span>`;
+    dicaOrigem();
+  }
+  function dicaOrigem() {
+    const el = $("#origem-dica");
+    const atual = form.origem.value.trim();
+    const amg = amigoPorApelido(atual);
+    el.hidden = !atual.startsWith("@") || somenteLeitura();
+    el.classList.toggle("erro", amg === null || amg === undefined);
+    if (amg) el.textContent = `👁 ${amg.nome} vai acompanhar esta conta em "A receber", sem poder alterar.`;
+    else if (amg === null) el.textContent = `${atual} não é seu amigo no app. Convide em ⋯ → Amigos ou tire o @.`;
+    else el.textContent = "Depois do @ use só letras sem acento, números, ponto ou _.";
   }
   $("#origem-chips").addEventListener("click", (e) => {
     const b = e.target.closest("[data-origem]");
@@ -590,6 +681,11 @@
       data_pagamento: pago ? ((ed && ed.pago && ed.data_pagamento) || todayStr()) : null,
       observacao: form.observacao.value.trim() || null
     };
+    if (base.origem && base.origem.startsWith("@")) {
+      const amg = amigoPorApelido(base.origem);
+      if (!amg) return formError(`${base.origem} não é seu amigo no app. Convide em ⋯ → Amigos ou escreva a origem sem o @.`);
+      base.origem = "@" + amg.apelido;
+    }
     if (tipo === "parcelado") {
       if (!base.parcela_atual || !base.total_parcelas) return formError("Informe a parcela atual e o total de parcelas.");
       if (base.parcela_atual > base.total_parcelas) return formError("A parcela atual não pode ser maior que o total.");
@@ -694,13 +790,6 @@
   const userForm = $("#user-form");
   let usuarios = [];
 
-  function origemChecks(sel) {
-    return state.hist.origens.map((o) =>
-      `<label class="chk-chip"><input type="checkbox" value="${esc(o)}"${sel.includes(o) ? " checked" : ""}><span>${esc(o)}</span></label>`
-    ).join("") || `<span class="muted small">Nenhuma origem cadastrada ainda.</span>`;
-  }
-  function marcadas(el) { return [...el.querySelectorAll("input[type=checkbox]:checked")].map((i) => i.value); }
-
   async function chamarFuncao(body) {
     const { data, error } = await sb.functions.invoke("usuarios", { body });
     if (error) {
@@ -718,10 +807,8 @@
     usuarios = data || [];
     $("#users-list").innerHTML = usuarios.length ? usuarios.map((u) => `
       <div class="card user-card" data-id="${u.id}">
-        <div class="user-top"><strong>${esc(u.nome || u.email)}</strong><span class="muted small">${esc(u.email || "")}</span></div>
+        <div class="user-top"><strong>${esc(u.nome || u.email)}</strong><span class="muted small">${u.apelido ? "@" + esc(u.apelido) + " · " : ""}${esc(u.email || "")}</span></div>
         <label class="check"><input type="checkbox" class="proprias"${u.controla_proprias ? " checked" : ""}> Controla as próprias contas</label>
-        <span class="flabel">Pode ver das suas origens</span>
-        <div class="chips-wrap origens-wrap">${origemChecks(u.origens || [])}</div>
         <div class="user-actions">
           <button type="button" class="btn" data-acao="salvar">Salvar acesso</button>
           <button type="button" class="link" data-acao="senha">Trocar senha</button>
@@ -734,7 +821,6 @@
     closeMenu();
     userForm.reset();
     $("#user-error").hidden = true;
-    $("#user-origens").innerHTML = origemChecks(state.origem ? [state.origem] : []);
     usersDlg.showModal();
     await loadUsuarios();
   });
@@ -745,23 +831,25 @@
     e.preventDefault();
     const err = $("#user-error");
     err.hidden = true;
-    const origens = marcadas($("#user-origens"));
     const proprias = userForm.proprias.checked;
-    if (!origens.length && !proprias) {
-      err.textContent = "Marque \"Controla as próprias contas\" ou pelo menos uma origem que essa pessoa pode ver.";
-      err.hidden = false; return;
-    }
+    const convidar = userForm.convidar.checked;
+    const email = userForm.email.value.trim();
     const btn = $("#user-create");
     btn.disabled = true; btn.textContent = "Criando...";
     try {
-      const r = await chamarFuncao({ acao: "criar", nome: userForm.nome.value.trim(), email: userForm.email.value.trim(), senha: userForm.senha.value, origens, proprias });
+      const r = await chamarFuncao({ acao: "criar", nome: userForm.nome.value.trim(), email, senha: userForm.senha.value, origens: [], proprias });
       if (proprias && r?.id) {
         const { error } = await sb.from("perfis").update({ controla_proprias: true }).eq("id", r.id);
         if (error) throw new Error("Usuário criado, mas não deu para liberar as contas próprias. Marque a opção no cartão dele e toque em Salvar acesso.");
       }
-      toast("Usuário criado. Passe o e-mail e a senha para a pessoa.");
+      let aviso = "Usuário criado. Passe o e-mail e a senha para a pessoa.";
+      if (convidar) {
+        const { error } = await sb.rpc("convidar_amigo", { alvo: email });
+        aviso = error ? `Usuário criado, mas o convite de amizade não foi: ${friendlyError(error)}` : "Usuário criado e convite de amizade enviado. Passe o e-mail e a senha para a pessoa.";
+        loadAmigos();
+      }
+      toast(aviso);
       userForm.reset();
-      $("#user-origens").innerHTML = origemChecks([]);
       await loadUsuarios();
     } catch (ex) {
       err.textContent = ex.message; err.hidden = false;
@@ -779,10 +867,8 @@
     const quem = u?.nome || u?.email || "este usuário";
     try {
       if (b.dataset.acao === "salvar") {
-        const origens = marcadas(card.querySelector(".origens-wrap"));
         const proprias = card.querySelector(".proprias").checked;
-        if (!origens.length && !proprias) { toast("Marque as contas próprias ou pelo menos uma origem."); return; }
-        const { error } = await sb.from("perfis").update({ origens, controla_proprias: proprias }).eq("id", id);
+        const { error } = await sb.from("perfis").update({ controla_proprias: proprias }).eq("id", id);
         if (error) throw error;
         toast("Acesso atualizado.");
       } else if (b.dataset.acao === "senha") {
@@ -799,6 +885,94 @@
     } catch (ex) {
       toast(friendlyError(ex));
     }
+  });
+
+  // ---------------------------------------------------------------- amigos e convites
+  const amigosDlg = $("#amigos-dialog");
+  const apelidoForm = $("#apelido-form");
+  const conviteForm = $("#convite-form");
+
+  function amigosErro(msg) {
+    const el = $("#amigos-error");
+    el.textContent = msg || "";
+    el.hidden = !msg;
+  }
+  function renderAmigos() {
+    const recebidos = convitesRecebidos();
+    const aceitos = amigosAceitos();
+    const enviados = state.amigos.filter((a) => a.status === "pendente" && a.enviado_por_mim);
+    const pessoa = (a) => `<div class="amigo-nome"><strong>${esc(a.nome)}</strong><span class="muted small">@${esc(a.apelido)}</span></div>`;
+    const bloco = (titulo, itens, acoes) => itens.length ? `<h3 class="amigos-tit">${titulo}</h3>` + itens.map((a) =>
+      `<div class="card amigo-card" data-id="${a.amizade_id}">${pessoa(a)}<div class="amigo-acoes">${acoes(a)}</div></div>`).join("") : "";
+    $("#amigos-lista").innerHTML =
+      bloco("Convites recebidos", recebidos, () =>
+        `<button type="button" class="btn primary" data-acao="aceitar">Aceitar</button><button type="button" class="link danger" data-acao="recusar">Recusar</button>`) +
+      bloco("Amigos", aceitos, () => `<button type="button" class="link danger" data-acao="remover">Desfazer</button>`) +
+      bloco("Convites enviados", enviados, () => `<span class="muted small">aguardando</span><button type="button" class="link" data-acao="cancelar">Cancelar</button>`) ||
+      `<p class="muted small">Você ainda não tem amigos no app.</p>`;
+  }
+
+  async function abrirAmigos() {
+    closeMenu();
+    amigosErro("");
+    conviteForm.reset();
+    apelidoForm.apelido.value = state.perfil?.apelido || "";
+    renderAmigos();
+    if (!amigosDlg.open) amigosDlg.showModal();
+    await loadAmigos();
+    renderAmigos();
+  }
+  $("#open-amigos").addEventListener("click", abrirAmigos);
+  $("#convite-aviso").addEventListener("click", abrirAmigos);
+  $("#amigos-close").addEventListener("click", () => amigosDlg.close());
+  amigosDlg.addEventListener("click", (e) => { if (e.target === amigosDlg) amigosDlg.close(); });
+
+  apelidoForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    amigosErro("");
+    const { data, error } = await sb.rpc("definir_apelido", { novo: apelidoForm.apelido.value });
+    if (error) return amigosErro(friendlyError(error));
+    if (state.perfil) state.perfil.apelido = data;
+    apelidoForm.apelido.value = data;
+    toast(`Seu @ agora é @${data}.`);
+  });
+
+  conviteForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    amigosErro("");
+    const alvo = conviteForm.alvo.value.trim();
+    if (!alvo) return amigosErro("Digite o @ ou o e-mail da pessoa.");
+    const btn = conviteForm.querySelector("button");
+    btn.disabled = true;
+    const { data, error } = await sb.rpc("convidar_amigo", { alvo });
+    btn.disabled = false;
+    if (error) return amigosErro(friendlyError(error));
+    conviteForm.reset();
+    toast(data === "aceita" ? "Essa pessoa já tinha convidado você. Agora vocês são amigos." : "Convite enviado. Assim que a pessoa aceitar, ela aparece como origem.");
+    await loadAmigos();
+    renderAmigos();
+  });
+
+  $("#amigos-lista").addEventListener("click", async (e) => {
+    const b = e.target.closest("[data-acao]");
+    if (!b) return;
+    const id = b.closest("[data-id]").dataset.id;
+    const a = state.amigos.find((x) => x.amizade_id === id);
+    const quem = a?.nome || "essa pessoa";
+    amigosErro("");
+    let error;
+    if (b.dataset.acao === "aceitar" || b.dataset.acao === "recusar") {
+      ({ error } = await sb.rpc("responder_convite", { convite: id, aceitar: b.dataset.acao === "aceitar" }));
+      if (!error) toast(b.dataset.acao === "aceitar" ? `Agora você e ${quem} são amigos.` : "Convite recusado.");
+    } else {
+      const remover = b.dataset.acao === "remover";
+      if (remover && !confirm(`Desfazer a amizade com ${quem}? Vocês deixam de ver as contas em que marcaram um ao outro. Nada é apagado.`)) return;
+      ({ error } = await sb.rpc("remover_amigo", { amizade: id }));
+      if (!error) toast(remover ? "Amizade desfeita." : "Convite cancelado.");
+    }
+    if (error) return amigosErro(friendlyError(error));
+    await loadAmigos();
+    renderAmigos();
   });
 
   // ---------------------------------------------------------------- PDF para enviar
@@ -961,7 +1135,7 @@
     window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
   }
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible" && state.user) loadMonth();
+    if (document.visibilityState === "visible" && state.user) { loadMonth(); loadAmigos(); }
   });
 
   init();
