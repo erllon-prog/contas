@@ -7,7 +7,7 @@
   });
 
   const MAX_FILE_MB = 10;
-  const LS = { origem: "contas.origemFiltro", lastOrigem: "contas.ultimaOrigem", lastTipo: "contas.ultimoTipo", pdf: "contas.pdfOrigem" };
+  const LS = { origem: "contas.origemFiltro", lastOrigem: "contas.ultimaOrigem", lastTipo: "contas.ultimoTipo", pdf: "contas.pdfOrigem", visao: "contas.visao" };
 
   // ---------------------------------------------------------------- estado
   const state = {
@@ -22,7 +22,8 @@
     removeNota: false,
     origemTocada: false,        // usuário escolheu a origem à mão neste formulário
     hist: { origens: [], porDescricao: new Map(), descricoes: [] },
-    perfil: null                // papel do usuário logado: admin ou leitor
+    perfil: null,               // papel do usuário logado: admin ou leitor
+    visao: "minhas"             // "minhas" = contas da própria pessoa; "compartilhadas" = origens liberadas por outra pessoa
   };
 
   // ---------------------------------------------------------------- utilitários
@@ -109,25 +110,60 @@
     $("#view-login").hidden = !!user;
     $("#view-app").hidden = !user;
     if (user && changed) loadPerfil().then(() => { loadMonth(); loadHistory(); });
-    if (!user) { state.contas = []; state.perfil = null; aplicarPapel(); render(); }
+    if (!user) { state.contas = []; state.perfil = null; state.visao = "minhas"; aplicarPapel(); render(); }
   }
 
-  const ehLeitor = () => state.perfil?.papel === "leitor";
+  // quem pode ter as próprias contas: o administrador, quem não tem perfil (instalação antiga)
+  // e o leitor que o administrador liberou para controlar as próprias contas
+  const temProprias = () => !state.perfil || state.perfil.papel === "admin" || !!state.perfil.controla_proprias;
+  // quem recebeu origens de outra pessoa para ver (somente leitura)
+  const temCompartilhadas = () => state.perfil?.papel === "leitor" && (state.perfil.origens || []).length > 0;
+  // edita só nas próprias contas; o que foi compartilhado é sempre somente leitura
+  const somenteLeitura = () => state.visao !== "minhas" || !temProprias();
+
   async function loadPerfil() {
     const { data } = await sb.from("perfis").select("*").eq("id", state.user.id).maybeSingle();
     state.perfil = data || null;
+    const salva = lsGet(`${LS.visao}.${state.user.id}`);
+    if (!temProprias()) state.visao = "compartilhadas";
+    else if (!temCompartilhadas()) state.visao = "minhas";
+    else state.visao = salva === "compartilhadas" ? "compartilhadas" : "minhas";
     aplicarPapel();
   }
   function aplicarPapel() {
-    const leitor = ehLeitor();
-    document.body.classList.toggle("leitor", leitor);
-    $("#add-btn").hidden = leitor;
-    $("#copy-monthly").hidden = leitor;
+    const ro = somenteLeitura();
+    document.body.classList.toggle("leitor", ro);
+    $("#add-btn").hidden = ro;
+    $("#copy-monthly").hidden = ro;
     $("#open-users").hidden = state.perfil?.papel !== "admin";
+    const duas = !!state.user && temProprias() && temCompartilhadas();
+    $("#visao-seg").hidden = !duas;
+    document.querySelectorAll("#visao-seg button").forEach((b) => b.classList.toggle("active", b.dataset.visao === state.visao));
     const tag = $("#modo-leitura");
-    tag.hidden = !leitor;
-    tag.textContent = leitor ? `Olá, ${state.perfil.nome || ""}! Você está vendo as contas em modo somente leitura.` : "";
+    tag.hidden = !ro || !state.user;
+    tag.textContent = !ro ? "" : (duas
+      ? "Contas compartilhadas com você, em modo somente leitura."
+      : `Olá, ${state.perfil?.nome || ""}! Você está vendo as contas em modo somente leitura.`);
   }
+
+  // filtra pela visão: as minhas (user_id = eu) ou as que outra pessoa compartilhou
+  function daVisao(q) {
+    return state.visao === "minhas" ? q.eq("user_id", state.user.id) : q.neq("user_id", state.user.id);
+  }
+
+  $("#visao-seg").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-visao]");
+    if (!b || b.dataset.visao === state.visao) return;
+    state.visao = b.dataset.visao;
+    lsSet(`${LS.visao}.${state.user.id}`, state.visao);
+    state.origem = "";
+    lsSet(LS.origem, "");
+    state.contas = [];
+    state.hist = { origens: [], porDescricao: new Map(), descricoes: [] };
+    aplicarPapel();
+    loadMonth();
+    loadHistory();
+  });
 
   $("#login-form").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -154,11 +190,13 @@
   async function loadMonth() {
     $("#month-label").textContent = monthLabel(state.month);
     $("#month-picker").value = state.month;
-    const { data, error } = await sb
+    const visao = state.visao, mes = state.month;
+    const { data, error } = await daVisao(sb
       .from("contas")
       .select("*")
-      .eq("mes_referencia", monthToDb(state.month))
+      .eq("mes_referencia", monthToDb(state.month)))
       .order("descricao", { ascending: true });
+    if (visao !== state.visao || mes !== state.month) return; // trocou de visão ou de mês no meio da busca
     if (error) { toast(friendlyError(error)); return; }
     state.contas = data || [];
     render();
@@ -166,13 +204,14 @@
 
   // histórico para sugestões: origens mais usadas e o último lançamento de cada descrição
   async function loadHistory() {
-    const { data, error } = await sb
+    const visao = state.visao;
+    const { data, error } = await daVisao(sb
       .from("contas")
-      .select("descricao, valor, tipo, origem, total_parcelas, created_at, mes_referencia")
+      .select("descricao, valor, tipo, origem, total_parcelas, created_at, mes_referencia"))
       .order("mes_referencia", { ascending: false })
       .order("created_at", { ascending: false })
       .limit(3000);
-    if (error || !data) return;
+    if (error || !data || visao !== state.visao) return;
     const freq = new Map();
     const porDescricao = new Map();
     for (const c of data) {
@@ -311,7 +350,7 @@
     const conta = state.contas.find((c) => c.id === id);
     if (!conta) return;
     if (btn.dataset.action === "edit") openForm(conta);
-    if (btn.dataset.action === "toggle" && !ehLeitor()) togglePago(conta);
+    if (btn.dataset.action === "toggle" && !somenteLeitura()) togglePago(conta);
   });
 
   async function togglePago(conta) {
@@ -361,7 +400,9 @@
   $("#copy-monthly").addEventListener("click", async () => {
     closeMenu();
     const prev = shiftMonthKey(state.month, -1);
+    if (somenteLeitura()) return;
     const { data, error } = await sb.from("contas").select("*")
+      .eq("user_id", state.user.id)
       .eq("mes_referencia", monthToDb(prev)).eq("tipo", "mensal");
     if (error) { toast(friendlyError(error)); return; }
     const existentes = new Set(state.contas.map((c) => norm(c.descricao)));
@@ -495,8 +536,8 @@
     }
     $("#nota-atual").hidden = !(conta && conta.nota_path);
     renderOrigemChips();
-    // leitor: só visualiza (e abre a nota fiscal)
-    const ro = ehLeitor();
+    // somente leitura: só visualiza (e abre a nota fiscal)
+    const ro = somenteLeitura();
     form.querySelectorAll("input, select, textarea, #tipo-seg button, #origem-chips button").forEach((el) => { el.disabled = ro; });
     form.querySelector(".sheet-foot").hidden = ro;
     form.querySelector(".file-btn").hidden = ro;
@@ -506,7 +547,7 @@
     if (!conta) setTimeout(() => form.valor.focus(), 60);
   }
 
-  $("#add-btn").addEventListener("click", () => openForm(null));
+  $("#add-btn").addEventListener("click", () => { if (!somenteLeitura()) openForm(null); });
   $("#form-close").addEventListener("click", () => dlg.close());
   dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });
 
@@ -678,7 +719,9 @@
     $("#users-list").innerHTML = usuarios.length ? usuarios.map((u) => `
       <div class="card user-card" data-id="${u.id}">
         <div class="user-top"><strong>${esc(u.nome || u.email)}</strong><span class="muted small">${esc(u.email || "")}</span></div>
-        <div class="chips-wrap">${origemChecks(u.origens || [])}</div>
+        <label class="check"><input type="checkbox" class="proprias"${u.controla_proprias ? " checked" : ""}> Controla as próprias contas</label>
+        <span class="flabel">Pode ver das suas origens</span>
+        <div class="chips-wrap origens-wrap">${origemChecks(u.origens || [])}</div>
         <div class="user-actions">
           <button type="button" class="btn" data-acao="salvar">Salvar acesso</button>
           <button type="button" class="link" data-acao="senha">Trocar senha</button>
@@ -703,11 +746,19 @@
     const err = $("#user-error");
     err.hidden = true;
     const origens = marcadas($("#user-origens"));
-    if (!origens.length) { err.textContent = "Marque pelo menos uma origem que essa pessoa pode ver."; err.hidden = false; return; }
+    const proprias = userForm.proprias.checked;
+    if (!origens.length && !proprias) {
+      err.textContent = "Marque \"Controla as próprias contas\" ou pelo menos uma origem que essa pessoa pode ver.";
+      err.hidden = false; return;
+    }
     const btn = $("#user-create");
     btn.disabled = true; btn.textContent = "Criando...";
     try {
-      await chamarFuncao({ acao: "criar", nome: userForm.nome.value.trim(), email: userForm.email.value.trim(), senha: userForm.senha.value, origens });
+      const r = await chamarFuncao({ acao: "criar", nome: userForm.nome.value.trim(), email: userForm.email.value.trim(), senha: userForm.senha.value, origens, proprias });
+      if (proprias && r?.id) {
+        const { error } = await sb.from("perfis").update({ controla_proprias: true }).eq("id", r.id);
+        if (error) throw new Error("Usuário criado, mas não deu para liberar as contas próprias. Marque a opção no cartão dele e toque em Salvar acesso.");
+      }
       toast("Usuário criado. Passe o e-mail e a senha para a pessoa.");
       userForm.reset();
       $("#user-origens").innerHTML = origemChecks([]);
@@ -728,7 +779,10 @@
     const quem = u?.nome || u?.email || "este usuário";
     try {
       if (b.dataset.acao === "salvar") {
-        const { error } = await sb.from("perfis").update({ origens: marcadas(card) }).eq("id", id);
+        const origens = marcadas(card.querySelector(".origens-wrap"));
+        const proprias = card.querySelector(".proprias").checked;
+        if (!origens.length && !proprias) { toast("Marque as contas próprias ou pelo menos uma origem."); return; }
+        const { error } = await sb.from("perfis").update({ origens, controla_proprias: proprias }).eq("id", id);
         if (error) throw error;
         toast("Acesso atualizado.");
       } else if (b.dataset.acao === "senha") {
