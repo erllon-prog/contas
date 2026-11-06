@@ -14,7 +14,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="app.css?v=9">
+  <link rel="stylesheet" href="app.css?v=10">
 </head>
 <body>
   <!-- LOGIN -->
@@ -37,6 +37,7 @@
       </button>
       <p class="muted small">Com o Google, entra só quem já tem acesso ao app com o mesmo Gmail.</p>
       <p id="login-error" class="error" hidden></p>
+      <p class="instalar-dica" data-instalar hidden>📲 <b>No iPhone:</b> abra este link no <b>Safari</b>, toque em <b>Compartilhar</b> (o quadrado com a seta para cima) e em <b>Adicionar à Tela de Início</b>. O Contas vira um ícone como os outros apps.</p>
     </form>
   </section>
 
@@ -47,6 +48,7 @@
       <button class="month" id="month-label" aria-label="Escolher mês"></button>
       <button class="icon-btn" id="next-month" aria-label="Próximo mês">›</button>
       <input type="month" id="month-picker" class="sr-only" tabindex="-1">
+      <button class="icon-btn alertas-btn" id="alertas-btn" aria-label="Avisos de vencimento">🔔<span id="alertas-badge" class="alertas-badge" hidden></span></button>
       <button class="icon-btn menu-btn" id="menu-btn" aria-label="Menu">⋯<span id="menu-dot" class="menu-dot" hidden></span></button>
     </header>
 
@@ -65,6 +67,11 @@
         <button type="button" data-visao="receber">A receber</button>
       </div>
       <button type="button" id="convite-aviso" class="convite-aviso" hidden></button>
+      <button type="button" id="vence-aviso" class="convite-aviso vence-aviso" hidden></button>
+      <div class="instalar-card" id="instalar-card" hidden>
+        <p>📲 <b>Instale no iPhone:</b> toque em <b>Compartilhar</b> (quadrado com seta) e em <b>Adicionar à Tela de Início</b>.</p>
+        <button type="button" class="icon-btn" id="instalar-fechar" aria-label="Fechar dica">✕</button>
+      </div>
       <p id="modo-leitura" class="leitura-tag" hidden></p>
       <div class="origem-bar">
         <span class="stat-label">Origem</span>
@@ -121,7 +128,16 @@
       </label>
 
       <div class="field">
-        <span class="flabel">Origem</span>
+        <span class="flabel">É uma conta</span>
+        <div class="seg seg-2" id="direcao-seg">
+          <button type="button" data-receber="0">A pagar</button>
+          <button type="button" data-receber="1">A receber</button>
+        </div>
+        <input type="hidden" name="receber" value="0">
+      </div>
+
+      <div class="field">
+        <span class="flabel" id="origem-label">Origem</span>
         <div id="origem-chips" class="chips-scroll"></div>
         <input name="origem" list="origens" maxlength="60" placeholder="Ou digite outra origem (@ para um amigo)" autocapitalize="off">
         <datalist id="origens"></datalist>
@@ -156,7 +172,7 @@
           <input name="data_compra" type="date">
         </label>
         <label class="check inline pago-check">
-          <input type="checkbox" name="pago"> Já está pago
+          <input type="checkbox" name="pago"> <span id="pago-label">Já está pago</span>
         </label>
       </div>
 
@@ -263,6 +279,28 @@
     </div>
   </dialog>
 
+  <!-- AVISOS -->
+  <dialog id="alertas-dialog" class="sheet">
+    <div class="sheet-body">
+      <header class="sheet-head">
+        <h2>Avisos de vencimento</h2>
+        <button type="button" class="icon-btn" id="alertas-close" aria-label="Fechar">✕</button>
+      </header>
+      <label class="avisar-com">Avisar com
+        <select id="alertas-dias">
+          <option value="1">1 dia</option>
+          <option value="3">3 dias</option>
+          <option value="5">5 dias</option>
+          <option value="7">7 dias</option>
+          <option value="15">15 dias</option>
+        </select>
+        de antecedência
+      </label>
+      <div id="alertas-lista"></div>
+      <p class="muted small">Os avisos são calculados no seu aparelho a partir do vencimento de cada conta e aparecem quando você abre o app.</p>
+    </div>
+  </dialog>
+
   <!-- PDF -->
   <dialog id="pdf-dialog" class="sheet">
     <form id="pdf-form" method="dialog">
@@ -288,7 +326,7 @@
   <div id="toast" class="toast" role="status" hidden></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="config.js?v=9"></script>
-  <script src="app.js?v=9"></script>
+  <script src="config.js?v=10"></script>
+  <script src="app.js?v=10"></script>
 </body>
 </html>
