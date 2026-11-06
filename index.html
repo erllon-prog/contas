@@ -14,7 +14,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="app.css?v=8">
+  <link rel="stylesheet" href="app.css?v=9">
 </head>
 <body>
   <!-- LOGIN -->
@@ -215,8 +215,8 @@
         <label>E-mail
           <input name="email" type="email" required autocomplete="off">
         </label>
-        <label>Senha inicial
-          <input name="senha" type="text" minlength="8" required autocomplete="new-password" placeholder="Mínimo 8 caracteres">
+        <label>Senha inicial (opcional)
+          <input name="senha" type="text" minlength="8" autocomplete="new-password" placeholder="Em branco: o app cria uma sozinho">
         </label>
         <label class="check">
           <input type="checkbox" name="proprias" checked> Controla as próprias contas
@@ -288,7 +288,7 @@
   <div id="toast" class="toast" role="status" hidden></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="config.js?v=8"></script>
-  <script src="app.js?v=8"></script>
+  <script src="config.js?v=9"></script>
+  <script src="app.js?v=9"></script>
 </body>
 </html>
