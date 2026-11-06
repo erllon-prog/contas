@@ -271,6 +271,9 @@ label { display: grid; gap: 6px; font-size: 13px; color: var(--muted); font-weig
 .small { font-size: 13px; }
 
 /* ---------- acesso somente leitura e usuários ---------- */
+.seg.seg-2 { grid-template-columns: repeat(2, 1fr); }
+.visao-seg { margin-bottom: 12px; }
+.visao-seg button { min-height: 40px; font-size: 14px; }
 .leitura-tag {
   margin: 0 0 10px; font-size: 13px; font-weight: 700; color: var(--accent-strong);
   background: var(--accent-soft); padding: 8px 12px; border-radius: 10px;
