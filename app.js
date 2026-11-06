@@ -7,7 +7,7 @@
   });
 
   const MAX_FILE_MB = 10;
-  const LS = { origem: "contas.origemFiltro", lastOrigem: "contas.ultimaOrigem", lastTipo: "contas.ultimoTipo", pdf: "contas.pdfOrigem", visao: "contas.visao" };
+  const LS = { origem: "contas.origemFiltro", lastOrigem: "contas.ultimaOrigem", lastTipo: "contas.ultimoTipo", pdf: "contas.pdfOrigem", visao: "contas.visao", avisoDias: "contas.avisoDias", avisoVisto: "contas.avisoVisto", instalarFechado: "contas.instalarFechado" };
 
   // ---------------------------------------------------------------- estado
   const state = {
@@ -24,7 +24,8 @@
     hist: { origens: [], porDescricao: new Map(), descricoes: [] },
     perfil: null,               // papel do usuário logado: admin ou leitor
     visao: "minhas",            // "minhas" = contas da própria pessoa; "receber" = contas em que um amigo marcou a pessoa com @
-    amigos: []                  // amizades e convites (função meus_amigos)
+    amigos: [],                 // amizades e convites (função meus_amigos)
+    alertas: []                 // contas que vencem logo (calculado no aparelho, nada vai para o banco)
   };
 
   // ---------------------------------------------------------------- utilitários
@@ -121,8 +122,9 @@
   const amigosAceitos = () => state.amigos.filter((a) => a.status === "aceita");
   const convitesRecebidos = () => state.amigos.filter((a) => a.status === "pendente" && !a.enviado_por_mim);
   const temReceber = () => amigosAceitos().length > 0;
-  // edita só nas próprias contas; o que um amigo marcou para a pessoa é sempre somente leitura
-  const somenteLeitura = () => state.visao !== "minhas" || !temProprias();
+  // só lança quem tem contas próprias; o que um amigo marcou para a pessoa é sempre somente leitura
+  const somenteLeitura = () => !temProprias();
+  const podeEditar = (c) => !c || (c.user_id === state.user?.id && temProprias());
   const nomeAmigo = (id) => { const a = state.amigos.find((x) => x.amigo_id === id); return a ? a.nome : "Amigo"; };
   const amigoPorApelido = (txt) => {
     const m = /^@([a-z0-9_.]+)$/i.exec((txt || "").trim());
@@ -138,7 +140,6 @@
   function escolherVisao() {
     const salva = lsGet(`${LS.visao}.${state.user.id}`);
     if (!temProprias()) state.visao = "receber";
-    else if (!temReceber()) state.visao = "minhas";
     else state.visao = salva === "receber" ? "receber" : "minhas";
     aplicarPapel();
   }
@@ -173,7 +174,7 @@
     $("#add-btn").hidden = ro;
     $("#copy-monthly").hidden = ro;
     $("#open-users").hidden = state.perfil?.papel !== "admin";
-    const duas = !!state.user && temProprias() && temReceber();
+    const duas = !!state.user && temProprias();
     $("#visao-seg").hidden = !duas;
     document.querySelectorAll("#visao-seg button").forEach((b) => b.classList.toggle("active", b.dataset.visao === state.visao));
     const receber = state.visao === "receber";
@@ -182,18 +183,21 @@
     $("#filtro-abertas").textContent = receber ? "A receber" : "A pagar";
     $("#filtro-pagas").textContent = receber ? "Já pagas" : "Pagas";
     $("#empty").innerHTML = receber
-      ? (temReceber() ? "Nenhum amigo marcou você em contas deste mês." : "Você ainda não tem amigos no app. Abra <b>⋯ → Amigos</b> para aceitar ou enviar um convite.")
+      ? (temProprias() ? "Nada a receber neste mês. Toque em <b>+</b> para anotar quem está te devendo." : (temReceber() ? "Nenhum amigo marcou você em contas deste mês." : "Você ainda não tem amigos no app. Abra <b>⋯ → Amigos</b> para aceitar ou enviar um convite."))
       : "Nenhuma conta neste mês. Toque em <b>+</b> para lançar.";
     const tag = $("#modo-leitura");
     tag.hidden = !receber || !state.user;
     tag.textContent = !receber ? "" : (duas
-      ? "Contas em que seus amigos marcaram você com @. Só eles podem alterar."
+      ? "Quem está te devendo: o que você anotou e as contas em que seus amigos marcaram você com @."
       : `Olá, ${state.perfil?.nome || ""}! Aqui aparecem as contas em que seus amigos marcaram você. Só eles podem alterar.`);
   }
 
   // filtra pela visão: as minhas (user_id = eu) ou as que um amigo marcou para mim
   function daVisao(q) {
-    return state.visao === "minhas" ? q.eq("user_id", state.user.id) : q.eq("para_usuario", state.user.id);
+    const eu = state.user.id;
+    return state.visao === "minhas"
+      ? q.eq("user_id", eu).eq("receber", false)
+      : q.or(`and(user_id.eq.${eu},receber.eq.true),para_usuario.eq.${eu}`);
   }
 
   $("#visao-seg").addEventListener("click", (e) => {
@@ -266,29 +270,34 @@
       .order("descricao", { ascending: true });
     if (visao !== state.visao || mes !== state.month) return; // trocou de visão ou de mês no meio da busca
     if (error) { toast(friendlyError(error)); return; }
-    state.contas = (data || []).map((c) => visao === "receber" ? { ...c, origem_original: c.origem, origem: nomeAmigo(c.user_id) } : c);
+    state.contas = (data || []).map((c) => c.user_id !== state.user.id ? { ...c, origem_original: c.origem, origem: nomeAmigo(c.user_id), deAmigo: true } : c);
     render();
+    loadAlertas();
   }
 
   // histórico para sugestões: origens mais usadas e o último lançamento de cada descrição
   async function loadHistory() {
     const visao = state.visao;
-    if (visao !== "minhas") { state.hist = { origens: [], porDescricao: new Map(), descricoes: [] }; return; }
-    const { data, error } = await daVisao(sb
+    if (!temProprias()) { state.hist = { origens: [], origensReceber: [], porDescricao: new Map(), descricoes: [] }; return; }
+    const { data, error } = await sb
       .from("contas")
-      .select("descricao, valor, tipo, origem, total_parcelas, created_at, mes_referencia"))
+      .select("descricao, valor, tipo, origem, total_parcelas, created_at, mes_referencia, receber")
+      .eq("user_id", state.user.id)
       .order("mes_referencia", { ascending: false })
       .order("created_at", { ascending: false })
       .limit(3000);
     if (error || !data || visao !== state.visao) return;
     const freq = new Map();
+    const freqReceber = new Map();
     const porDescricao = new Map();
     for (const c of data) {
-      if (c.origem) freq.set(c.origem, (freq.get(c.origem) || 0) + 1);
+      const f = c.receber ? freqReceber : freq;
+      if (c.origem) f.set(c.origem, (f.get(c.origem) || 0) + 1);
       const k = norm(c.descricao);
       if (k && !porDescricao.has(k)) porDescricao.set(k, c);
     }
     state.hist.origens = [...freq.entries()].sort((a, b) => b[1] - a[1]).map(([o]) => o);
+    state.hist.origensReceber = [...freqReceber.entries()].sort((a, b) => b[1] - a[1]).map(([o]) => o);
     state.hist.porDescricao = porDescricao;
     state.hist.descricoes = [...porDescricao.values()].map((c) => c.descricao);
     $("#descricoes").innerHTML = state.hist.descricoes.map((d) => `<option value="${esc(d)}">`).join("");
@@ -313,7 +322,8 @@
   function renderOrigemTabs() {
     // só as origens que têm contas no mês aberto, das mais usadas para as menos usadas
     const noMes = new Set(state.contas.map((c) => c.origem).filter(Boolean));
-    const pos = (o) => { const i = state.hist.origens.indexOf(o); return i < 0 ? 9999 : i; };
+    const lista0 = state.visao === "receber" ? (state.hist.origensReceber || []) : state.hist.origens;
+    const pos = (o) => { const i = lista0.indexOf(o); return i < 0 ? 9999 : i; };
     const lista = [...noMes].sort((a, b) => pos(a) - pos(b) || a.localeCompare(b, "pt-BR"));
     // a origem filtrada continua visível (e marcada) mesmo sem contas no mês, para dar para desmarcar
     if (state.origem && !noMes.has(state.origem)) lista.push(state.origem);
@@ -390,6 +400,7 @@
       meta.push(`<span class="badge parcelado">${c.parcela_atual}/${c.total_parcelas}</span>`);
     }
     if (c.origem && !state.origem) meta.push(`<span>${esc(c.origem)}</span>`);
+    if (c.deAmigo) meta.push(`<span class="badge visivel" title="Lançado por ${esc(c.origem)}">👁 de amigo</span>`);
     if (c.para_usuario && state.visao === "minhas") meta.push(`<span class="badge visivel" title="${esc(nomeAmigo(c.para_usuario))} acompanha esta conta">👁 ${esc(nomeAmigo(c.para_usuario))}</span>`);
     if (c.nota_path) meta.push(`<span title="Tem nota fiscal">📎</span>`);
 
@@ -420,7 +431,7 @@
     const conta = state.contas.find((c) => c.id === id);
     if (!conta) return;
     if (btn.dataset.action === "edit") openForm(conta);
-    if (btn.dataset.action === "toggle" && !somenteLeitura()) togglePago(conta);
+    if (btn.dataset.action === "toggle" && podeEditar(conta)) togglePago(conta);
   });
 
   async function togglePago(conta) {
@@ -429,7 +440,7 @@
     Object.assign(conta, patch);       // atualiza na hora
     render();
     const { error } = await sb.from("contas").update(patch).eq("id", conta.id);
-    if (error) { toast(friendlyError(error)); loadMonth(); }
+    if (error) { toast(friendlyError(error)); loadMonth(); } else loadAlertas();
   }
 
   // ---------------------------------------------------------------- navegação e filtros
@@ -472,14 +483,14 @@
     const prev = shiftMonthKey(state.month, -1);
     if (somenteLeitura()) return;
     const { data, error } = await sb.from("contas").select("*")
-      .eq("user_id", state.user.id)
+      .eq("user_id", state.user.id).eq("receber", state.visao === "receber")
       .eq("mes_referencia", monthToDb(prev)).eq("tipo", "mensal");
     if (error) { toast(friendlyError(error)); return; }
     const existentes = new Set(state.contas.map((c) => norm(c.descricao)));
     const novas = (data || [])
       .filter((c) => !existentes.has(norm(c.descricao)))
       .map((c) => ({
-        descricao: c.descricao, valor: c.valor, tipo: "mensal", origem: c.origem, observacao: null,
+        descricao: c.descricao, valor: c.valor, tipo: "mensal", origem: c.origem, observacao: null, receber: !!c.receber,
         mes_referencia: monthToDb(state.month),
         vencimento: addMonthsDate(c.vencimento, 1),
         data_compra: null,
@@ -527,6 +538,21 @@
     $("#gerar-row").hidden = !parcelado || !!state.editing;
     if (parcelado && !form.parcela_atual.value) form.parcela_atual.value = 1;
   }
+  function setDirecao(receber) {
+    form.receber.value = receber ? "1" : "0";
+    document.querySelectorAll("#direcao-seg button").forEach((b) => b.classList.toggle("active", b.dataset.receber === form.receber.value));
+    $("#origem-label").textContent = receber ? "Quem está te devendo" : "Origem";
+    $("#pago-label").textContent = receber ? "Já recebi" : "Já está pago";
+    form.origem.placeholder = receber ? "Nome de quem te deve" : "Ou digite outra origem (@ para um amigo)";
+  }
+  const ehReceber = () => form.receber.value === "1";
+  $("#direcao-seg").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-receber]");
+    if (!b || b.disabled) return;
+    setDirecao(b.dataset.receber === "1");
+    renderOrigemChips();
+  });
+
   $("#tipo-seg").addEventListener("click", (e) => {
     const b = e.target.closest("[data-tipo]");
     if (b) setTipo(b.dataset.tipo);
@@ -540,6 +566,8 @@
       // digitando @: mostra só os amigos que combinam
       const q = atual.slice(1).toLowerCase();
       top = amigos.filter((o) => o.slice(1).startsWith(q) || norm(nomeAmigo(amigoPorApelido(o)?.amigo_id)).includes(norm(q)));
+    } else if (ehReceber()) {
+      top = (state.hist.origensReceber || []).slice(0, 8);
     } else {
       top = state.hist.origens.filter((o) => !o.startsWith("@")).slice(0, 8);
       amigos.forEach((o) => { if (!top.includes(o)) top.push(o); });
@@ -555,7 +583,7 @@
     const el = $("#origem-dica");
     const atual = form.origem.value.trim();
     const amg = amigoPorApelido(atual);
-    el.hidden = !atual.startsWith("@") || somenteLeitura();
+    el.hidden = !atual.startsWith("@") || somenteLeitura() || ehReceber();
     el.classList.toggle("erro", amg === null || amg === undefined);
     if (amg) el.textContent = `👁 ${amg.nome} vai acompanhar esta conta em "A receber", sem poder alterar.`;
     else if (amg === null) el.textContent = `${atual} não é seu amigo no app. Convide em ⋯ → Amigos ou tire o @.`;
@@ -615,11 +643,13 @@
       form.pago.checked = conta.pago;
       form.observacao.value = conta.observacao || "";
       state.origemTocada = true;
+      setDirecao(!!conta.receber || !!conta.deAmigo);
       setTipo(conta.tipo);
       if (conta.vencimento || conta.observacao || conta.mes_referencia.slice(0, 7) !== state.month) $("#mais-opcoes").open = true;
     } else {
       // padrões: origem do filtro ou a última usada, tipo da última conta, data de hoje, mês aberto
-      form.origem.value = manter?.origem ?? (state.origem || lsGet(LS.lastOrigem));
+      setDirecao(manter?.receber ?? state.visao === "receber");
+      form.origem.value = manter?.origem ?? (state.origem || (ehReceber() ? "" : lsGet(LS.lastOrigem)));
       form.data_compra.value = manter?.data_compra || todayStr();
       form.mes_referencia.value = manter?.mes || state.month;
       setTipo(manter?.tipo || lsGet(LS.lastTipo) || "avulso");
@@ -628,8 +658,8 @@
     $("#nota-atual").hidden = !(conta && conta.nota_path);
     renderOrigemChips();
     // somente leitura: só visualiza (e abre a nota fiscal)
-    const ro = somenteLeitura();
-    form.querySelectorAll("input, select, textarea, #tipo-seg button, #origem-chips button").forEach((el) => { el.disabled = ro; });
+    const ro = contaRo(conta);
+    form.querySelectorAll("input, select, textarea, #tipo-seg button, #direcao-seg button, #origem-chips button").forEach((el) => { el.disabled = ro; });
     form.querySelector(".sheet-foot").hidden = ro;
     form.querySelector(".file-btn").hidden = ro;
     $("#nota-remover").hidden = ro;
@@ -638,6 +668,7 @@
     if (!conta) setTimeout(() => form.valor.focus(), 60);
   }
 
+  function contaRo(conta) { return conta ? !podeEditar(conta) : somenteLeitura(); }
   $("#add-btn").addEventListener("click", () => { if (!somenteLeitura()) openForm(null); });
   $("#form-close").addEventListener("click", () => dlg.close());
   dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });
@@ -679,9 +710,11 @@
       pago,
       // data do pagamento: automática ao marcar como pago (mantém a anterior se já estava pago)
       data_pagamento: pago ? ((ed && ed.pago && ed.data_pagamento) || todayStr()) : null,
-      observacao: form.observacao.value.trim() || null
+      observacao: form.observacao.value.trim() || null,
+      receber: ehReceber()
     };
-    if (base.origem && base.origem.startsWith("@")) {
+    if (base.receber && !base.origem) return formError("Informe quem está te devendo.");
+    if (!base.receber && base.origem && base.origem.startsWith("@")) {
       const amg = amigoPorApelido(base.origem);
       if (!amg) return formError(`${base.origem} não é seu amigo no app. Convide em ⋯ → Amigos ou escreva a origem sem o @.`);
       base.origem = "@" + amg.apelido;
@@ -722,7 +755,7 @@
         if (error) throw error;
         conta = data[0];
         qtd = rows.length;
-        lsSet(LS.lastOrigem, base.origem);
+        if (!base.receber) lsSet(LS.lastOrigem, base.origem);
         lsSet(LS.lastTipo, tipo);
       }
 
@@ -745,10 +778,12 @@
       toast(qtd > 1 ? `${qtd} parcelas lançadas.` : (ed ? "Alterado." : "Lançado."));
       const mes = base.mes_referencia.slice(0, 7);
       if (lancarOutra) {
-        openForm(null, { origem: base.origem || "", tipo, data_compra: base.data_compra, mes });
+        openForm(null, { origem: base.origem || "", tipo, data_compra: base.data_compra, mes, receber: base.receber });
       } else {
         dlg.close();
         if (mes !== state.month) state.month = mes;
+        const visaoCerta = base.receber ? "receber" : "minhas";
+        if (state.visao !== visaoCerta) { state.visao = visaoCerta; lsSet(`${LS.visao}.${state.user.id}`, visaoCerta); aplicarPapel(); }
       }
       await loadMonth();
       loadHistory();
@@ -817,6 +852,7 @@
         <label class="check"><input type="checkbox" class="proprias"${u.controla_proprias ? " checked" : ""}> Controla as próprias contas</label>
         <div class="user-actions">
           <button type="button" class="btn" data-acao="salvar">Salvar acesso</button>
+          <button type="button" class="link" data-acao="link">Enviar link</button>
           <button type="button" class="link" data-acao="senha">Trocar senha</button>
           <button type="button" class="link danger" data-acao="excluir">Excluir</button>
         </div>
@@ -881,6 +917,8 @@
         const { error } = await sb.from("perfis").update({ controla_proprias: proprias }).eq("id", id);
         if (error) throw error;
         toast("Acesso atualizado.");
+      } else if (b.dataset.acao === "link") {
+        await enviarLink(u);
       } else if (b.dataset.acao === "senha") {
         const senha = prompt(`Nova senha para ${quem} (mínimo 8 caracteres):`);
         if (!senha) return;
@@ -896,6 +934,122 @@
       toast(friendlyError(ex));
     }
   });
+
+  const APP_URL = "https://erllon-prog.github.io/contas/";
+  async function enviarLink(u) {
+    const primeiro = (u?.nome || "").split(" ")[0];
+    const texto = `Oi${primeiro ? " " + primeiro : ""}! Te cadastrei no Contas, o app que uso para controlar as contas.\n\n` +
+      `1. Abra este link no Safari: ${APP_URL}\n` +
+      `2. Toque em Compartilhar (o quadrado com a seta para cima) e em "Adicionar à Tela de Início".\n` +
+      `3. Abra o ícone Contas e toque em "Entrar com Google" usando ${u?.email || "o seu Gmail"}.\n` +
+      `4. Aceite meu convite de amizade no aviso que aparece no topo.`;
+    try {
+      if (navigator.share) { await navigator.share({ title: "Contas", text: texto }); return; }
+    } catch (err) { if (err.name === "AbortError") return; }
+    try { await navigator.clipboard.writeText(texto); toast("Mensagem copiada. Cole no WhatsApp para enviar."); }
+    catch { prompt("Copie a mensagem:", texto); }
+  }
+
+  // ---------------------------------------------------------------- avisos de vencimento (só no aparelho)
+  const alertasDlg = $("#alertas-dialog");
+  const diasAviso = () => Number(lsGet(LS.avisoDias)) || 3;
+  function addDias(n) { const d = new Date(); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; }
+  function diasAte(str) {
+    const [y, m, d] = str.split("-").map(Number);
+    const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+    return Math.round((new Date(y, m - 1, d) - hoje) / 86400000);
+  }
+  function quandoTxt(n) {
+    if (n < -1) return `venceu há ${-n} dias`;
+    if (n === -1) return "venceu ontem";
+    if (n === 0) return "vence hoje";
+    if (n === 1) return "vence amanhã";
+    return `vence em ${n} dias`;
+  }
+  let carregandoAlertas = false;
+  async function loadAlertas() {
+    if (!state.user || !temProprias() || carregandoAlertas) return;
+    carregandoAlertas = true;
+    const { data, error } = await sb.from("contas")
+      .select("id, descricao, valor, vencimento, receber, origem, mes_referencia")
+      .eq("user_id", state.user.id).eq("pago", false)
+      .gte("vencimento", addDias(-60)).lte("vencimento", addDias(diasAviso()))
+      .order("vencimento", { ascending: true }).limit(60);
+    carregandoAlertas = false;
+    if (error) return;
+    state.alertas = data || [];
+    mostrarAlertas();
+  }
+  function mostrarAlertas() {
+    const n = state.alertas.length;
+    const vencidas = state.alertas.filter((c) => diasAte(c.vencimento) < 0).length;
+    const badge = $("#alertas-badge");
+    badge.hidden = n === 0;
+    badge.textContent = n > 9 ? "9+" : String(n);
+    badge.classList.toggle("atrasado", vencidas > 0);
+    try { if (navigator.setAppBadge) (n ? navigator.setAppBadge(n) : navigator.clearAppBadge()).catch(() => {}); } catch {}
+    // aviso no topo: aparece uma vez por dia
+    const hoje = todayStr();
+    const aviso = $("#vence-aviso");
+    if (n && lsGet(`${LS.avisoVisto}.${state.user.id}`) !== hoje) {
+      const pagar = state.alertas.filter((c) => !c.receber).length;
+      const partes = [];
+      if (vencidas) partes.push(`${vencidas} vencida${vencidas > 1 ? "s" : ""}`);
+      if (n - vencidas) partes.push(`${n - vencidas} vencendo em até ${diasAviso()} dia${diasAviso() > 1 ? "s" : ""}`);
+      aviso.textContent = `⏰ ${partes.join(" e ")}${pagar < n ? " (inclui contas a receber)" : ""}. Toque para ver.`;
+      aviso.hidden = false;
+    } else {
+      aviso.hidden = true;
+    }
+    if (alertasDlg.open) renderAlertas();
+  }
+  function renderAlertas() {
+    $("#alertas-dias").value = String(diasAviso());
+    $("#alertas-lista").innerHTML = state.alertas.length ? `<ul class="alertas-ul">${state.alertas.map((c) => {
+      const n = diasAte(c.vencimento);
+      return `<li><button type="button" class="card alerta${n < 0 ? " atrasado" : n === 0 ? " hoje" : ""}" data-id="${c.id}">
+        <span class="alerta-tit">${c.receber ? `<span class="badge visivel">a receber</span> ` : ""}${esc(c.descricao)}</span>
+        <span class="alerta-val">${brl.format(Number(c.valor))}</span>
+        <span class="alerta-quando">${quandoTxt(n)} · ${fmtDate(c.vencimento)}${c.origem ? " · " + esc(c.origem) : ""}</span>
+      </button></li>`;
+    }).join("")}</ul>` : `<p class="muted small">Nenhuma conta vencendo nos próximos ${diasAviso()} dias. 🎉</p>`;
+  }
+  async function abrirAlertas() {
+    lsSet(`${LS.avisoVisto}.${state.user.id}`, todayStr());
+    $("#vence-aviso").hidden = true;
+    closeMenu();
+    renderAlertas();
+    if (!alertasDlg.open) alertasDlg.showModal();
+  }
+  $("#alertas-btn").addEventListener("click", abrirAlertas);
+  $("#vence-aviso").addEventListener("click", abrirAlertas);
+  $("#alertas-close").addEventListener("click", () => alertasDlg.close());
+  alertasDlg.addEventListener("click", (e) => { if (e.target === alertasDlg) alertasDlg.close(); });
+  $("#alertas-dias").addEventListener("change", (e) => { lsSet(LS.avisoDias, e.target.value); loadAlertas(); });
+  $("#alertas-lista").addEventListener("click", async (e) => {
+    const b = e.target.closest("[data-id]");
+    if (!b) return;
+    const a = state.alertas.find((x) => x.id === b.dataset.id);
+    if (!a) return;
+    alertasDlg.close();
+    state.month = a.mes_referencia.slice(0, 7);
+    const v = a.receber ? "receber" : "minhas";
+    if (state.visao !== v) { state.visao = v; lsSet(`${LS.visao}.${state.user.id}`, v); aplicarPapel(); }
+    state.origem = ""; lsSet(LS.origem, "");
+    await loadMonth();
+    const conta = state.contas.find((c) => c.id === a.id);
+    if (conta) openForm(conta);
+  });
+
+  // dica de instalar no iPhone (só aparece no Safari, fora do app instalado)
+  (function dicaInstalar() {
+    const ios = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    const instalado = navigator.standalone === true || matchMedia("(display-mode: standalone)").matches;
+    if (!ios || instalado) return;
+    document.querySelectorAll("[data-instalar]").forEach((el) => { el.hidden = false; });
+    if (!lsGet(LS.instalarFechado)) $("#instalar-card").hidden = false;
+    $("#instalar-fechar").addEventListener("click", () => { $("#instalar-card").hidden = true; lsSet(LS.instalarFechado, "1"); });
+  })();
 
   // ---------------------------------------------------------------- amigos e convites
   const amigosDlg = $("#amigos-dialog");
