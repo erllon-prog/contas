@@ -307,3 +307,41 @@ body.leitor .pay-toggle { pointer-events: none; }
 @media (max-width: 380px) {
   .row { grid-template-columns: 1fr; }
 }
+
+/* ---- versão 8: amigos, convites, @ e login com Google ---- */
+.menu-btn { position: relative; }
+.menu-dot {
+  position: absolute; top: 8px; right: 8px; width: 9px; height: 9px; border-radius: 50%;
+  background: var(--danger); box-shadow: 0 0 0 2px var(--surface);
+}
+.menu button .badge { margin-left: 6px; }
+.convite-aviso {
+  display: block; width: 100%; margin: 0 0 10px; padding: 10px 12px; border-radius: 10px;
+  border: 1px solid var(--accent); background: var(--accent-soft); color: var(--accent-strong);
+  font: inherit; font-size: 14px; font-weight: 700; text-align: left; cursor: pointer;
+}
+.chip.amigo:not(.active) { border-color: var(--accent); color: var(--accent-strong); }
+.origem-dica { margin: 6px 0 0; font-size: 13px; font-weight: 600; color: var(--accent-strong); }
+.origem-dica.erro { color: var(--danger); }
+.badge.visivel { background: var(--accent-soft); color: var(--accent-strong); }
+
+.amigos-bloco { display: grid; gap: 6px; margin: 14px 0 0; }
+.amigos-bloco p { margin: 0; }
+.inline-form { display: flex; gap: 8px; align-items: center; }
+.inline-form input { flex: 1; min-width: 0; }
+.inline-form .btn { flex: none; }
+.arroba { font-weight: 800; color: var(--muted); }
+.amigos-tit { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 18px 0 8px; }
+.amigo-card { padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.amigo-nome { display: grid; gap: 2px; min-width: 0; }
+.amigo-nome strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.amigo-acoes { display: flex; align-items: center; gap: 12px; flex: none; }
+.amigo-acoes .btn { min-height: 36px; padding: 6px 12px; }
+#amigos-lista { margin-top: 4px; }
+
+.ou { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 13px; }
+.ou::before, .ou::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+.google-btn {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  background: var(--surface); color: var(--text); border: 1px solid var(--border);
+}
