@@ -96,7 +96,7 @@ label { display: grid; gap: 6px; font-size: 13px; color: var(--muted); font-weig
 /* ---------- topo ---------- */
 .topbar {
   position: sticky; top: 0; z-index: 5;
-  display: grid; grid-template-columns: 44px 1fr 44px 44px; align-items: center; gap: 4px;
+  display: grid; grid-template-columns: 40px 1fr 40px 40px 40px; align-items: center; gap: 2px;
   padding: calc(env(safe-area-inset-top) + 8px) 12px 8px;
   background: color-mix(in srgb, var(--bg) 88%, transparent);
   backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
@@ -345,3 +345,34 @@ body.leitor .pay-toggle { pointer-events: none; }
   display: flex; align-items: center; justify-content: center; gap: 10px;
   background: var(--surface); color: var(--text); border: 1px solid var(--border);
 }
+
+/* ---- versão 10: avisos de vencimento, a receber e dica de instalar ---- */
+.alertas-btn { position: relative; font-size: 21px; }
+.alertas-badge {
+  position: absolute; top: 4px; right: 2px; min-width: 18px; height: 18px; padding: 0 5px;
+  border-radius: 9px; background: var(--warn); color: #fff; font-size: 11px; font-weight: 800;
+  display: grid; place-items: center; line-height: 1; box-shadow: 0 0 0 2px var(--surface);
+}
+.alertas-badge.atrasado { background: var(--danger); }
+.vence-aviso { border-color: var(--warn); background: var(--warn-soft); color: var(--text); }
+.avisar-com { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 14px; }
+.avisar-com select { width: auto; }
+.alertas-ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.alerta {
+  width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer;
+  display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 10px 12px;
+}
+.alerta-tit { font-weight: 700; }
+.alerta-val { font-weight: 800; text-align: right; }
+.alerta-quando { grid-column: 1 / -1; font-size: 13px; color: var(--muted); }
+.alerta.hoje .alerta-quando { color: var(--warn); font-weight: 700; }
+.alerta.atrasado .alerta-quando { color: var(--danger); font-weight: 700; }
+.instalar-card {
+  display: flex; align-items: center; gap: 8px; margin: 0 0 10px; padding: 8px 6px 8px 12px;
+  border-radius: 10px; border: 1px dashed var(--border); background: var(--surface);
+}
+.instalar-card p { margin: 0; font-size: 13px; flex: 1; }
+.instalar-card .icon-btn { width: 36px; height: 36px; font-size: 16px; }
+.instalar-dica { font-size: 13px; color: var(--muted); background: var(--surface-2); padding: 10px 12px; border-radius: 10px; }
+.topbar .icon-btn { width: 40px; }
+.topbar .month { font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 8px 4px; }
