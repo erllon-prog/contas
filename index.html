@@ -14,7 +14,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="app.css?v=10">
+  <link rel="stylesheet" href="app.css?v=11">
 </head>
 <body>
   <!-- LOGIN -->
@@ -22,7 +22,7 @@
     <form id="login-form" class="login-card" autocomplete="on">
       <img src="icons/icon-192.png" alt="" class="login-logo">
       <h1>Contas</h1>
-      <p class="muted">Entre com seu e-mail e senha.</p>
+      <p class="muted">Entre com o Google ou com seu e-mail e senha.</p>
       <label>E-mail
         <input type="email" name="email" autocomplete="username" required>
       </label>
@@ -35,10 +35,21 @@
         <svg viewBox="0 0 48 48" width="18" height="18" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.6 5.4 2.7 13.3l7.9 6.1C12.5 13.6 17.8 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.7 6c4.5-4.2 6.9-10.3 6.9-17.7z"/><path fill="#FBBC05" d="M10.6 28.6c-.5-1.4-.8-3-.8-4.6s.3-3.2.8-4.6l-7.9-6.1C1 16.6 0 20.2 0 24s1 7.4 2.7 10.7l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.7-6c-2.1 1.4-4.9 2.3-8.2 2.3-6.2 0-11.5-4.1-13.4-9.9l-7.9 6.1C6.6 42.6 14.6 48 24 48z"/></svg>
         Entrar com Google
       </button>
-      <p class="muted small">Com o Google, entra só quem já tem acesso ao app com o mesmo Gmail.</p>
+      <p class="muted small">Primeira vez? É só entrar com o Google: sua conta é criada na hora e só você vê as suas contas.</p>
       <p id="login-error" class="error" hidden></p>
       <p class="instalar-dica" data-instalar hidden>📲 <b>No iPhone:</b> abra este link no <b>Safari</b>, toque em <b>Compartilhar</b> (o quadrado com a seta para cima) e em <b>Adicionar à Tela de Início</b>. O Contas vira um ícone como os outros apps.</p>
     </form>
+  </section>
+
+  <!-- ACESSO REVOGADO -->
+  <section id="view-revogado" class="login" hidden>
+    <div class="login-card">
+      <img src="icons/icon-192.png" alt="" class="login-logo">
+      <h1>Contas</h1>
+      <p>Seu acesso ao app foi revogado pelo administrador.</p>
+      <p class="muted small">Se achar que foi engano, fale com quem te passou o link.</p>
+      <button type="button" id="revogado-sair" class="btn block">Sair</button>
+    </div>
   </section>
 
   <!-- APP -->
@@ -57,7 +68,8 @@
       <button id="copy-monthly">Trazer contas mensais do mês anterior</button>
       <button id="export-csv">Exportar mês em CSV</button>
       <button id="open-amigos">Amigos <span id="amigos-badge" class="badge novo" hidden></span></button>
-      <button id="open-users" hidden>Usuários e acessos</button>
+      <button id="open-users" hidden>Usuários e acessos <span id="novos-badge" class="badge novo" hidden></span></button>
+      <button id="compartilhar-app">Compartilhar o app</button>
       <button id="logout" class="danger">Sair</button>
     </div>
 
@@ -66,6 +78,7 @@
         <button type="button" data-visao="minhas">Minhas contas</button>
         <button type="button" data-visao="receber">A receber</button>
       </div>
+      <button type="button" id="novos-aviso" class="convite-aviso" hidden></button>
       <button type="button" id="convite-aviso" class="convite-aviso" hidden></button>
       <button type="button" id="vence-aviso" class="convite-aviso vence-aviso" hidden></button>
       <div class="instalar-card" id="instalar-card" hidden>
@@ -221,10 +234,10 @@
         <h2>Usuários e acessos</h2>
         <button type="button" class="icon-btn" id="users-close" aria-label="Fechar">✕</button>
       </header>
-      <p class="muted small">Cada pessoa entra com o próprio e-mail e senha. Com "Controla as próprias contas", ela lança e controla as contas dela, que só ela vê. Para ela ver uma conta sua, vocês precisam ser amigos no app: aí é só escrever o @ dela na origem.</p>
+      <p class="muted small">Quem tiver o link pode entrar com o Google e já começa a usar, com as próprias contas, que só a pessoa vê. Você recebe um aviso e decide aqui: <b>Aprovar</b> ou <b>Revogar</b>. Sem resposta, fica aprovado em 7 dias. Para alguém ver uma conta sua, vocês precisam ser amigos no app: aí é só escrever o @ da pessoa na origem.</p>
       <div id="users-list" class="users-list"></div>
       <form id="user-form" class="user-new" autocomplete="off">
-        <h3>Novo usuário</h3>
+        <h3>Cadastrar alguém já aprovado</h3>
         <label>Nome
           <input name="nome" maxlength="60" placeholder="Ex: Mãe">
         </label>
@@ -297,7 +310,16 @@
         de antecedência
       </label>
       <div id="alertas-lista"></div>
-      <p class="muted small">Os avisos são calculados no seu aparelho a partir do vencimento de cada conta e aparecem quando você abre o app.</p>
+      <section class="push-box" id="push-box">
+        <h3>Notificações no celular</h3>
+        <p class="muted small" id="push-status"></p>
+        <div class="push-acoes">
+          <button type="button" class="btn primary" id="push-ativar" hidden>Ativar notificações</button>
+          <button type="button" class="btn" id="push-teste" hidden>Enviar um teste</button>
+          <button type="button" class="link danger" id="push-desativar" hidden>Desativar neste aparelho</button>
+        </div>
+      </section>
+      <p class="muted small">Com as notificações ativadas, todo dia às 8h chega um aviso das contas que vencem dentro do prazo escolhido acima, mesmo com o app fechado.</p>
     </div>
   </dialog>
 
@@ -326,7 +348,7 @@
   <div id="toast" class="toast" role="status" hidden></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="config.js?v=10"></script>
-  <script src="app.js?v=10"></script>
+  <script src="config.js?v=11"></script>
+  <script src="app.js?v=11"></script>
 </body>
 </html>
