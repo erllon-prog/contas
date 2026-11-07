@@ -376,3 +376,17 @@ body.leitor .pay-toggle { pointer-events: none; }
 .instalar-dica { font-size: 13px; color: var(--muted); background: var(--surface-2); padding: 10px 12px; border-radius: 10px; }
 .topbar .icon-btn { width: 40px; }
 .topbar .month { font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 8px 4px; }
+
+/* v11: notificações no celular e aprovação de pessoas novas */
+.push-box { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2); }
+.push-box h3 { margin: 0; font-size: 15px; }
+.push-box p { margin: 0; }
+.push-acoes { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.push-acoes .btn { min-height: 38px; padding: 8px 14px; }
+.badge.situacao { justify-self: start; font-size: 12px; }
+.badge.situacao.novo { background: var(--warn-soft); color: var(--warn); }
+.badge.situacao.revogado { background: var(--danger-soft); color: var(--danger); }
+.user-card.novo { border-color: var(--warn); }
+.user-card.revogado { opacity: .75; }
+.user-actions.decidir .btn { flex: 1; }
+.push-box .btn:not(.primary) { background: var(--surface); border: 1px solid var(--border); }
