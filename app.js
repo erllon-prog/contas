@@ -25,7 +25,8 @@
     perfil: null,               // papel do usuário logado: admin ou leitor
     visao: "minhas",            // "minhas" = contas da própria pessoa; "receber" = contas em que um amigo marcou a pessoa com @
     amigos: [],                 // amizades e convites (função meus_amigos)
-    alertas: []                 // contas que vencem logo (calculado no aparelho, nada vai para o banco)
+    alertas: [],                // contas que vencem logo (calculado no aparelho, nada vai para o banco)
+    novos: []                   // pessoas que entraram sozinhas pelo link e esperam o administrador (só admin)
   };
 
   // ---------------------------------------------------------------- utilitários
@@ -94,6 +95,7 @@
   function friendlyError(err) {
     const msg = (err && (err.message || err.error_description)) || String(err);
     if (/Invalid login credentials/i.test(msg)) return "E-mail ou senha incorretos.";
+    if (/banned/i.test(msg)) return "Seu acesso ao app foi revogado pelo administrador.";
     if (/Failed to fetch|NetworkError|Load failed/i.test(msg)) return "Sem conexão com o servidor. Verifique a internet.";
     if (/JWT|expired/i.test(msg)) return "Sua sessão expirou. Entre novamente.";
     return msg;
@@ -111,8 +113,30 @@
     state.user = user;
     $("#view-login").hidden = !!user;
     $("#view-app").hidden = !user;
-    if (user && changed) loadPerfil().then(() => { loadMonth(); loadHistory(); });
-    if (!user) { state.contas = []; state.perfil = null; state.visao = "minhas"; aplicarPapel(); render(); }
+    $("#view-revogado").hidden = true;
+    if (user && changed) loadPerfil().then((ok) => {
+      if (!ok) return;
+      loadMonth(); loadHistory(); depoisDoLogin();
+    });
+    if (!user) { state.contas = []; state.perfil = null; state.visao = "minhas"; state.novos = []; aplicarPapel(); render(); avisoNovos(); }
+  }
+
+  // acesso revogado pelo administrador: só mostra o aviso e o botão de sair
+  function mostrarRevogado() {
+    $("#view-app").hidden = true;
+    $("#view-revogado").hidden = false;
+  }
+  $("#revogado-sair").addEventListener("click", () => sb.auth.signOut());
+
+  // tarefas que rodam uma vez a cada login
+  function depoisDoLogin() {
+    if (state.perfil?.papel === "admin") loadNovos();
+    sincronizarPush();
+    const q = new URLSearchParams(location.search);
+    if (q.has("usuarios")) {
+      history.replaceState(null, "", location.pathname);
+      if (state.perfil?.papel === "admin") abrirUsuarios();
+    }
   }
 
   // quem pode ter as próprias contas: o administrador, quem não tem perfil (instalação antiga)
@@ -134,8 +158,10 @@
   async function loadPerfil() {
     const { data } = await sb.from("perfis").select("*").eq("id", state.user.id).maybeSingle();
     state.perfil = data || null;
+    if (state.perfil?.acesso === "revogado") { mostrarRevogado(); return false; }
     await loadAmigos(false);
     escolherVisao();
+    return true;
   }
   function escolherVisao() {
     const salva = lsGet(`${LS.visao}.${state.user.id}`);
@@ -159,7 +185,7 @@
   }
   function avisoConvites() {
     const n = convitesRecebidos().length;
-    $("#menu-dot").hidden = n === 0;
+    $("#menu-dot").hidden = n === 0 && !state.novos.length;
     const badge = $("#amigos-badge");
     badge.hidden = n === 0;
     badge.textContent = String(n);
@@ -246,15 +272,22 @@
     const desc = q.get("error_description") || q.get("error");
     if (!desc) return;
     const el = $("#login-error");
-    el.textContent = /signup|sign up|not allowed|disabled/i.test(desc)
-      ? "Esse Gmail não tem acesso ao app. Peça para o administrador criar seu usuário com este e-mail."
-      : `Não deu para entrar com o Google: ${desc}`;
+    el.textContent = /banned/i.test(desc)
+      ? "Seu acesso ao app foi revogado pelo administrador."
+      : /signup|sign up|not allowed|disabled/i.test(desc)
+        ? "O cadastro de pessoas novas está fechado no momento. Fale com quem te passou o link."
+        : `Não deu para entrar com o Google: ${desc}`;
     el.hidden = false;
     history.replaceState(null, "", location.pathname);
   })();
 
   $("#logout").addEventListener("click", async () => {
     closeMenu();
+    // saiu: este aparelho para de receber os avisos dessa pessoa (volta a receber se ela entrar de novo)
+    try {
+      const sub = await inscricaoDoAparelho();
+      if (sub) await sb.rpc("remover_inscricao", { p_endpoint: sub.endpoint });
+    } catch {}
     await sb.auth.signOut();
   });
 
@@ -842,30 +875,78 @@
     return data;
   }
 
+  const dataCurta = (iso) => iso ? new Date(iso).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }) : "";
+  function situacaoTxt(u) {
+    if (u.acesso === "novo") {
+      const fim = new Date(new Date(u.created_at).getTime() + 7 * 86400000);
+      return `<span class="badge situacao novo">Novo · entrou em ${dataCurta(u.created_at)}</span>
+        <span class="muted small">Sem resposta, fica aprovado em ${dataCurta(fim.toISOString())}.</span>`;
+    }
+    if (u.acesso === "revogado") return `<span class="badge situacao revogado">Acesso revogado</span>`;
+    return "";
+  }
+
   async function loadUsuarios() {
     const { data, error } = await sb.from("perfis").select("*").eq("dono", state.user.id).order("created_at");
     if (error) { toast(friendlyError(error)); return; }
-    usuarios = data || [];
+    // quem espera resposta aparece primeiro
+    const ordem = { novo: 0, aprovado: 1, revogado: 2 };
+    usuarios = (data || []).sort((a, b) => (ordem[a.acesso] ?? 1) - (ordem[b.acesso] ?? 1));
+    state.novos = usuarios.filter((u) => u.acesso === "novo");
+    avisoNovos();
     $("#users-list").innerHTML = usuarios.length ? usuarios.map((u) => `
-      <div class="card user-card" data-id="${u.id}">
+      <div class="card user-card${u.acesso === "novo" ? " novo" : ""}${u.acesso === "revogado" ? " revogado" : ""}" data-id="${u.id}">
         <div class="user-top"><strong>${esc(u.nome || u.email)}</strong><span class="muted small">${u.apelido ? "@" + esc(u.apelido) + " · " : ""}${esc(u.email || "")}</span></div>
+        ${situacaoTxt(u)}
+        ${u.acesso === "novo" ? `<div class="user-actions decidir">
+          <button type="button" class="btn primary" data-acao="aprovar">Aprovar</button>
+          <button type="button" class="btn danger-outline" data-acao="revogar">Revogar</button>
+        </div>` : ""}
+        ${u.acesso === "revogado" ? `<div class="user-actions">
+          <button type="button" class="btn" data-acao="aprovar">Devolver o acesso</button>
+          <button type="button" class="link danger" data-acao="excluir">Excluir</button>
+        </div>` : `
         <label class="check"><input type="checkbox" class="proprias"${u.controla_proprias ? " checked" : ""}> Controla as próprias contas</label>
         <div class="user-actions">
           <button type="button" class="btn" data-acao="salvar">Salvar acesso</button>
           <button type="button" class="link" data-acao="link">Enviar link</button>
           <button type="button" class="link" data-acao="senha">Trocar senha</button>
+          ${u.acesso === "aprovado" ? `<button type="button" class="link danger" data-acao="revogar">Revogar</button>` : ""}
           <button type="button" class="link danger" data-acao="excluir">Excluir</button>
-        </div>
+        </div>`}
       </div>`).join("") : `<p class="muted small">Ainda não há outros usuários.</p>`;
   }
 
-  $("#open-users").addEventListener("click", async () => {
+  // administrador: pessoas que entraram sozinhas pelo link e ainda não foram aprovadas
+  async function loadNovos() {
+    if (state.perfil?.papel !== "admin") return;
+    const { data, error } = await sb.from("perfis").select("id, nome, email, created_at, acesso")
+      .eq("dono", state.user.id).eq("acesso", "novo").order("created_at");
+    if (error) return;
+    state.novos = data || [];
+    avisoNovos();
+  }
+  function avisoNovos() {
+    const n = state.novos.length;
+    const el = $("#novos-aviso");
+    el.hidden = n === 0 || !state.user;
+    if (n === 1) el.textContent = `👤 ${state.novos[0].nome || state.novos[0].email} (${state.novos[0].email}) começou a usar o app. Toque para aprovar ou revogar.`;
+    else if (n > 1) el.textContent = `👤 ${n} pessoas novas começaram a usar o app. Toque para aprovar ou revogar.`;
+    const b = $("#novos-badge");
+    b.hidden = n === 0;
+    b.textContent = String(n);
+    $("#menu-dot").hidden = n === 0 && convitesRecebidos().length === 0;
+  }
+
+  async function abrirUsuarios() {
     closeMenu();
     userForm.reset();
     $("#user-error").hidden = true;
-    usersDlg.showModal();
+    if (!usersDlg.open) usersDlg.showModal();
     await loadUsuarios();
-  });
+  }
+  $("#open-users").addEventListener("click", abrirUsuarios);
+  $("#novos-aviso").addEventListener("click", abrirUsuarios);
   $("#users-close").addEventListener("click", () => usersDlg.close());
   usersDlg.addEventListener("click", (e) => { if (e.target === usersDlg) usersDlg.close(); });
 
@@ -917,6 +998,17 @@
         const { error } = await sb.from("perfis").update({ controla_proprias: proprias }).eq("id", id);
         if (error) throw error;
         toast("Acesso atualizado.");
+      } else if (b.dataset.acao === "aprovar") {
+        b.disabled = true;
+        await chamarFuncao({ acao: "acesso", id, valor: "aprovado" });
+        toast(u?.acesso === "revogado" ? `${quem} tem acesso de novo.` : `${quem} foi aprovado.`);
+        await loadUsuarios();
+      } else if (b.dataset.acao === "revogar") {
+        if (!confirm(`Revogar o acesso de ${quem}? A pessoa sai do app e não consegue mais entrar. Dá para devolver depois.`)) return;
+        b.disabled = true;
+        await chamarFuncao({ acao: "acesso", id, valor: "revogado" });
+        toast(`Acesso de ${quem} revogado.`);
+        await loadUsuarios();
       } else if (b.dataset.acao === "link") {
         await enviarLink(u);
       } else if (b.dataset.acao === "senha") {
@@ -931,6 +1023,7 @@
         await loadUsuarios();
       }
     } catch (ex) {
+      b.disabled = false;
       toast(friendlyError(ex));
     }
   });
@@ -949,6 +1042,21 @@
     try { await navigator.clipboard.writeText(texto); toast("Mensagem copiada. Cole no WhatsApp para enviar."); }
     catch { prompt("Copie a mensagem:", texto); }
   }
+
+  // qualquer pessoa pode passar o link; quem entrar pelo Google já começa a usar
+  $("#compartilhar-app").addEventListener("click", async () => {
+    closeMenu();
+    const texto = `Estou usando o Contas para controlar as contas a pagar e a receber. Experimenta:\n\n` +
+      `1. Abra este link no Safari: ${APP_URL}\n` +
+      `2. Toque em Compartilhar (o quadrado com a seta para cima) e em "Adicionar à Tela de Início".\n` +
+      `3. Abra o ícone Contas e toque em "Entrar com Google". Pronto, só você vê as suas contas.` +
+      (state.perfil?.apelido ? `\n\nMeu @ no app é @${state.perfil.apelido}, se quiser me adicionar como amigo.` : "");
+    try {
+      if (navigator.share) { await navigator.share({ title: "Contas", text: texto }); return; }
+    } catch (err) { if (err.name === "AbortError") return; }
+    try { await navigator.clipboard.writeText(texto); toast("Mensagem copiada. Cole no WhatsApp para enviar."); }
+    catch { prompt("Copie a mensagem:", texto); }
+  });
 
   // ---------------------------------------------------------------- avisos de vencimento (só no aparelho)
   const alertasDlg = $("#alertas-dialog");
@@ -1019,13 +1127,20 @@
     $("#vence-aviso").hidden = true;
     closeMenu();
     renderAlertas();
+    renderPush();
+    pegarChavePush().catch(() => {}); // já deixa a chave pronta para o toque em "Ativar"
     if (!alertasDlg.open) alertasDlg.showModal();
   }
   $("#alertas-btn").addEventListener("click", abrirAlertas);
   $("#vence-aviso").addEventListener("click", abrirAlertas);
   $("#alertas-close").addEventListener("click", () => alertasDlg.close());
   alertasDlg.addEventListener("click", (e) => { if (e.target === alertasDlg) alertasDlg.close(); });
-  $("#alertas-dias").addEventListener("change", (e) => { lsSet(LS.avisoDias, e.target.value); loadAlertas(); });
+  $("#alertas-dias").addEventListener("change", (e) => {
+    lsSet(LS.avisoDias, e.target.value);
+    loadAlertas();
+    renderPush();
+    sb.rpc("definir_aviso_dias", { p_dias: Number(e.target.value) }).then(() => {}, () => {});
+  });
   $("#alertas-lista").addEventListener("click", async (e) => {
     const b = e.target.closest("[data-id]");
     if (!b) return;
@@ -1040,6 +1155,151 @@
     const conta = state.contas.find((c) => c.id === a.id);
     if (conta) openForm(conta);
   });
+
+  // ---------------------------------------------------------------- notificações no celular
+  // O aviso sai do servidor (todo dia às 8h). Aqui só guardamos o "endereço" de notificação deste aparelho.
+  const ehIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const instalado = () => navigator.standalone === true || matchMedia("(display-mode: standalone)").matches;
+  const pushSuportado = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+  let chavePush = null;
+  let inscricaoAtual = null;
+
+  async function chamarPush(body) {
+    const { data, error } = await sb.functions.invoke("push", { body });
+    if (error) {
+      let msg = error.message;
+      try { const j = await error.context.json(); if (j?.error) msg = j.error; } catch {}
+      throw new Error(msg);
+    }
+    if (data?.error) throw new Error(data.error);
+    return data;
+  }
+  async function pegarChavePush() {
+    if (chavePush || !state.user || !pushSuportado()) return chavePush;
+    const r = await chamarPush({ acao: "chave" });
+    chavePush = r.chave;
+    return chavePush;
+  }
+  function chaveBytes(b64) {
+    const s = b64.replace(/-/g, "+").replace(/_/g, "/");
+    const bin = atob(s + "===".slice((s.length + 3) % 4));
+    return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+  }
+  async function inscricaoDoAparelho() {
+    if (!pushSuportado()) return null;
+    const reg = await navigator.serviceWorker.getRegistration();
+    return reg ? await reg.pushManager.getSubscription() : null;
+  }
+  function nomeAparelho() {
+    const ua = navigator.userAgent;
+    if (/iphone/i.test(ua)) return "iPhone";
+    if (/ipad/i.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)) return "iPad";
+    if (/android/i.test(ua)) return "Android";
+    if (/mac/i.test(ua)) return "Mac";
+    if (/windows/i.test(ua)) return "Windows";
+    return "Navegador";
+  }
+  async function salvarInscricao(sub) {
+    const j = sub.toJSON();
+    const { error } = await sb.rpc("salvar_inscricao", { p_endpoint: j.endpoint, p_p256dh: j.keys.p256dh, p_auth: j.keys.auth, p_aparelho: nomeAparelho() });
+    if (error) throw error;
+    sb.rpc("definir_aviso_dias", { p_dias: diasAviso() }).then(() => {}, () => {});
+  }
+
+  async function renderPush() {
+    const st = $("#push-status"), at = $("#push-ativar"), te = $("#push-teste"), de = $("#push-desativar");
+    at.hidden = te.hidden = de.hidden = true;
+    if (ehIOS && !instalado()) {
+      st.textContent = "No iPhone, as notificações só funcionam com o app instalado: no Safari, toque em Compartilhar e em “Adicionar à Tela de Início”, depois abra o Contas pelo ícone.";
+      return;
+    }
+    if (!pushSuportado()) {
+      st.textContent = "Este aparelho não recebe notificações do app. No iPhone, é preciso o iOS 16.4 ou mais novo e o app instalado na Tela de Início.";
+      return;
+    }
+    if (Notification.permission === "denied") {
+      st.textContent = ehIOS
+        ? "As notificações estão bloqueadas. Libere em Ajustes › Notificações › Contas e volte aqui."
+        : "As notificações estão bloqueadas para este site. Libere nas configurações do navegador e volte aqui.";
+      return;
+    }
+    inscricaoAtual = await inscricaoDoAparelho().catch(() => null);
+    if (inscricaoAtual && Notification.permission === "granted") {
+      st.textContent = `✅ Ativadas neste aparelho. Todo dia às 8h você recebe o aviso das contas que vencem em até ${diasAviso()} dia${diasAviso() > 1 ? "s" : ""}.`;
+      te.hidden = de.hidden = false;
+    } else {
+      st.textContent = "Receba um aviso no celular, mesmo com o app fechado, quando uma conta estiver para vencer.";
+      at.hidden = false;
+    }
+  }
+
+  $("#push-ativar").addEventListener("click", async (e) => {
+    const b = e.currentTarget;
+    b.disabled = true;
+    try {
+      // o pedido de permissão precisa ser a primeira coisa depois do toque (exigência do iPhone)
+      const perm = await Notification.requestPermission();
+      if (perm !== "granted") { await renderPush(); if (perm === "default") toast("Você não respondeu ao pedido de notificações."); return; }
+      const chave = await pegarChavePush();
+      const reg = await navigator.serviceWorker.ready;
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: chaveBytes(chave) });
+      await salvarInscricao(sub);
+      const r = await chamarPush({ acao: "teste" });
+      toast(r?.ok ? "Notificações ativadas. Chegou um teste no seu celular." : "Notificações ativadas.");
+    } catch (ex) {
+      toast("Não deu para ativar: " + friendlyError(ex));
+    } finally {
+      b.disabled = false;
+      renderPush();
+    }
+  });
+  $("#push-teste").addEventListener("click", async (e) => {
+    const b = e.currentTarget;
+    b.disabled = true;
+    try {
+      const sub = await inscricaoDoAparelho();
+      if (sub) await salvarInscricao(sub);
+      const r = await chamarPush({ acao: "teste" });
+      toast(r?.ok ? "Teste enviado. Deve chegar em alguns segundos." : "O teste não foi entregue. Toque em Desativar e ative de novo.");
+    } catch (ex) {
+      toast(friendlyError(ex));
+    } finally {
+      b.disabled = false;
+    }
+  });
+  $("#push-desativar").addEventListener("click", async () => {
+    try {
+      const sub = await inscricaoDoAparelho();
+      if (sub) {
+        await sb.rpc("remover_inscricao", { p_endpoint: sub.endpoint });
+        await sub.unsubscribe();
+      }
+      toast("Notificações desativadas neste aparelho.");
+    } catch (ex) {
+      toast(friendlyError(ex));
+    }
+    renderPush();
+  });
+
+  // a cada login: se este aparelho já tinha notificações, liga a inscrição à pessoa que entrou
+  async function sincronizarPush() {
+    try {
+      if (!pushSuportado() || Notification.permission !== "granted") return;
+      const sub = await inscricaoDoAparelho();
+      if (sub) await salvarInscricao(sub);
+    } catch {}
+  }
+
+  // tocar numa notificação com o app já aberto
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.addEventListener("message", (e) => {
+      if (e.data?.tipo !== "abrir") return;
+      const url = new URL(e.data.url);
+      if (url.searchParams.has("usuarios") && state.perfil?.papel === "admin") abrirUsuarios();
+      else if (state.user) { loadMonth(); loadAlertas(); }
+    });
+  }
 
   // dica de instalar no iPhone (só aparece no Safari, fora do app instalado)
   (function dicaInstalar() {
@@ -1299,7 +1559,7 @@
     window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
   }
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible" && state.user) { loadMonth(); loadAmigos(); }
+    if (document.visibilityState === "visible" && state.user && state.perfil?.acesso !== "revogado") { loadMonth(); loadAmigos(); loadNovos(); }
   });
 
   init();
