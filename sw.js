@@ -1,7 +1,8 @@
 // Service worker: guarda só os arquivos do app (nunca os dados do Supabase).
-const CACHE = "contas-v11";
+const CACHE = "contas-v12";
 const SHELL = [
-  "./", "index.html", "app.css?v=11", "app.js?v=11", "config.js?v=11", "manifest.webmanifest",
+  "./", "index.html", "app.css?v=12", "app.js?v=12", "config.js?v=12", "manifest.webmanifest",
+  "../comum/nucleo.css?v=1", "../comum/nucleo.js?v=1", "../comum/config.js?v=1",
   "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png",
   "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"
 ];
@@ -58,7 +59,7 @@ self.addEventListener("fetch", (e) => {
   if (req.method !== "GET") return;
   const url = new URL(req.url);
   const isShell = url.origin === self.location.origin || url.hostname === "cdn.jsdelivr.net";
-  if (!isShell) return; // API, auth e storage do Supabase vão sempre direto para a rede
+  if (!isShell || url.pathname.endsWith("versoes.json")) return; // API, auth, storage e aviso de versão vão sempre direto para a rede
 
   // rede primeiro (pega atualizações), cache como reserva offline
   e.respondWith(

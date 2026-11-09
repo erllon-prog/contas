@@ -1,8 +1,4 @@
-// Configuração do Supabase.
-// A publishable key pode ficar no front-end: quem protege os dados é o RLS.
-// NUNCA coloque aqui a secret/service_role key.
-window.CONTAS_CONFIG = {
-  supabaseUrl: "https://sqbgzvjowecatrqxcvly.supabase.co",
-  supabaseKey: "sb_publishable_mvQOIfbPZ0v79C36AT0lnA_OfQcna6X",
+// Configuração do Contas. URL e chave do Supabase vêm de ../comum/config.js (iguais em todos os apps).
+window.CONTAS_CONFIG = Object.assign({}, window.COMUM_CONFIG, {
   bucket: "notas"
-};
+});
