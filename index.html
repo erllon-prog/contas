@@ -15,7 +15,7 @@
   <link rel="icon" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <link rel="stylesheet" href="../comum/nucleo.css?v=1">
-  <link rel="stylesheet" href="app.css?v=12">
+  <link rel="stylesheet" href="app.css?v=13">
 </head>
 <body>
   <!-- APP -->
@@ -96,6 +96,17 @@
         <h2 id="form-title">Nova conta</h2>
         <button type="button" class="icon-btn" id="form-close" aria-label="Fechar">✕</button>
       </header>
+
+      <div class="ler-nota" id="ler-nota">
+        <label class="ler-btn" id="ler-btn">
+          <span id="ler-btn-txt">📷 Fotografar a nota</span>
+          <input type="file" accept="image/*" capture="environment" id="ler-camera" aria-label="Fotografar a nota para preencher">
+        </label>
+        <label class="ler-alt">ou escolher foto ou PDF
+          <input type="file" accept="image/*,application/pdf" id="ler-arquivo" aria-label="Escolher foto ou PDF da nota">
+        </label>
+        <p id="ler-status" class="ler-status" role="status" hidden></p>
+      </div>
 
       <div class="valor-row">
         <span class="cur">R$</span>
@@ -252,7 +263,8 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="../comum/config.js?v=1"></script>
   <script src="../comum/nucleo.js?v=1"></script>
-  <script src="config.js?v=12"></script>
-  <script src="app.js?v=12"></script>
+  <script src="config.js?v=13"></script>
+  <script src="leitura.js?v=13"></script>
+  <script src="app.js?v=13"></script>
 </body>
 </html>
