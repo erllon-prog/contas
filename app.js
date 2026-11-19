@@ -5,7 +5,7 @@
 
   // ---------------------------------------------------------------- núcleo comum (login, perfil, amigos, usuários, avisos)
   // Fica em ../comum/nucleo.js: o mesmo código do Média Flex. Mexeu lá, muda nos dois apps.
-  const VERSAO = 12;
+  const VERSAO = 13;
   const nucleo = Nucleo.iniciar({
     app: "contas",
     nome: "Contas",
@@ -20,14 +20,15 @@
     amigosTexto: "Na origem de uma conta, escreva o @ de um amigo (ex.: <b>@josi</b>) para ele acompanhar essa conta em <b>A receber</b>, sem poder alterar. Origem sem @ só você vê.",
     conviteEnviadoTexto: "Convite enviado. Assim que a pessoa aceitar, ela aparece como origem.",
     novidades: {
-      id: "contas-12",
-      titulo: "O Contas foi atualizado",
+      id: "contas-13",
+      titulo: "Agora o Contas lê a nota",
       itens: [
-        "Nada mudou nas suas contas: tudo continua igual e no mesmo lugar.",
-        "Login, amigos e usuários agora são os mesmos do novo app <b>Média Flex</b> (consumo do carro, etanol x gasolina).",
-        "Para conhecer, toque em <b>⋯ → Nossos apps</b>. Entra com o mesmo login."
+        "Em <b>+</b>, toque em <b>📷 Fotografar a nota</b>: valor, data e descrição já vêm preenchidos. Quando dá, a origem e as parcelas também.",
+        "Nota de posto vira <b>Combustível</b>. Mercado, farmácia, restaurante e outros também são reconhecidos, usando as descrições que você já usa.",
+        "O app aprende: na próxima nota do mesmo lugar ou do mesmo cartão, ele repete a descrição e a origem que você salvou.",
+        "A foto já fica anexada como nota fiscal."
       ],
-      dica: "Se algo parecer estranho, feche o app e abra de novo. Quando sair outra versão, aparece um aviso com o botão Atualizar."
+      dica: "Confira os campos com contorno verde antes de salvar. Se a leitura errar, é só corrigir: da próxima vez ele acerta."
     },
     novidadesAlvo: ".content",
     aoEntrar,
@@ -57,7 +58,11 @@
     editing: null,              // conta em edição (ou null)
     removeNota: false,
     origemTocada: false,        // usuário escolheu a origem à mão neste formulário
-    hist: { origens: [], porDescricao: new Map(), descricoes: [] },
+    hist: { origens: [], porDescricao: new Map(), descricoes: [], descFreq: [], lidas: [] },
+    leitura: null,              // o que foi lido da foto da nota neste formulário (vai junto ao salvar)
+    notaLida: null,             // foto da nota lida, anexada automaticamente ao salvar
+    tocados: new Set(),         // campos que a pessoa mexeu à mão (a leitura não sobrescreve)
+    semColunaLeitura: false,    // banco ainda sem a coluna "leitura" (SQL da v13 não rodado): salva sem ela
     perfil: null,               // papel do usuário logado: admin ou leitor
     visao: "minhas",            // "minhas" = contas da própria pessoa; "receber" = contas em que um amigo marcou a pessoa com @
     amigos: [],                 // amizades e convites (função meus_amigos)
@@ -229,24 +234,33 @@
   // histórico para sugestões: origens mais usadas e o último lançamento de cada descrição
   async function loadHistory() {
     const visao = state.visao;
-    if (!temProprias()) { state.hist = { origens: [], origensReceber: [], porDescricao: new Map(), descricoes: [] }; return; }
-    const { data, error } = await sb
+    if (!temProprias()) { state.hist = { origens: [], origensReceber: [], porDescricao: new Map(), descricoes: [], descFreq: [], lidas: [] }; return; }
+    const buscar = (comLeitura) => sb
       .from("contas")
-      .select("descricao, valor, tipo, origem, total_parcelas, created_at, mes_referencia, receber")
+      .select("descricao, valor, tipo, origem, total_parcelas, created_at, mes_referencia, receber" + (comLeitura ? ", leitura" : ""))
       .eq("user_id", state.user.id)
       .order("mes_referencia", { ascending: false })
       .order("created_at", { ascending: false })
       .limit(3000);
+    let { data, error } = await buscar(!state.semColunaLeitura);
+    if (error && !state.semColunaLeitura && /leitura/i.test(error.message || "")) {
+      state.semColunaLeitura = true;          // SQL da v13 ainda não rodou: segue sem aprender pelo lugar
+      ({ data, error } = await buscar(false));
+    }
     if (error || !data || visao !== state.visao) return;
     const freq = new Map();
     const freqReceber = new Map();
     const porDescricao = new Map();
+    const qtdDesc = new Map();
     for (const c of data) {
       const f = c.receber ? freqReceber : freq;
       if (c.origem) f.set(c.origem, (f.get(c.origem) || 0) + 1);
       const k = norm(c.descricao);
       if (k && !porDescricao.has(k)) porDescricao.set(k, c);
+      if (k && !c.receber) qtdDesc.set(k, (qtdDesc.get(k) || 0) + 1);
     }
+    state.hist.descFreq = [...qtdDesc.entries()].sort((a, b) => b[1] - a[1]).map(([k, qtd]) => ({ descricao: porDescricao.get(k).descricao, qtd }));
+    state.hist.lidas = data.filter((c) => c.leitura && !c.receber);
     state.hist.origens = [...freq.entries()].sort((a, b) => b[1] - a[1]).map(([o]) => o);
     state.hist.origensReceber = [...freqReceber.entries()].sort((a, b) => b[1] - a[1]).map(([o]) => o);
     state.hist.porDescricao = porDescricao;
@@ -501,6 +515,7 @@
     const b = e.target.closest("[data-receber]");
     if (!b || b.disabled) return;
     setDirecao(b.dataset.receber === "1");
+    if (!state.editing) $("#ler-nota").hidden = ehReceber();
     renderOrigemChips();
   });
 
@@ -567,14 +582,174 @@
 
   form.nota.addEventListener("change", () => {
     const f = form.nota.files[0];
-    $("#nota-label").textContent = f ? `📎 ${f.name}` : "📎 Anexar nota fiscal";
+    $("#nota-label").textContent = f ? `📎 ${f.name}` : (state.notaLida ? "📎 Foto da nota lida (vai anexada)" : "📎 Anexar nota fiscal");
   });
+
+  // ---------------------------------------------------------------- v13: ler a nota pela foto
+  // A foto vai para a função ler-foto (a mesma do Média Flex), que usa o Gemini e devolve os campos.
+  // As sugestões saem de leitura.js, que cruza com o seu histórico. A foto fica anexada como nota fiscal.
+  form.addEventListener("input", (e) => {
+    const el = e.target;
+    if (el.name) state.tocados.add(el.name);
+    el.classList.remove("lido");
+  });
+  function lerStatus(html, kind) {
+    const el = $("#ler-status");
+    el.innerHTML = html; el.className = "ler-status" + (kind ? " " + kind : ""); el.hidden = !html;
+  }
+  function lerOcupado(on) {
+    $("#ler-btn").classList.toggle("busy", on);
+    $("#ler-btn-txt").textContent = on ? "Lendo a nota" : (state.leitura ? "📷 Ler outra foto" : "📷 Fotografar a nota");
+    ["#ler-camera", "#ler-arquivo"].forEach((s) => { $(s).disabled = on; });
+  }
+  function carregarImg(file) {
+    return new Promise((res, rej) => {
+      const u = URL.createObjectURL(file), img = new Image();
+      img.onload = () => res({ img, u });
+      img.onerror = () => { URL.revokeObjectURL(u); rej(new Error("Não consegui abrir essa foto. Tente tirar outra.")); };
+      img.src = u;
+    });
+  }
+  const toB64 = (blob) => new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(String(r.result).split(",")[1]);
+    r.onerror = () => rej(new Error("Não consegui ler o arquivo."));
+    r.readAsDataURL(blob);
+  });
+  // reduz no celular (foto do iPhone tem 3 a 8 MB): uma versão leve para ler e outra nítida para guardar
+  async function reduzir(img, tentativas, maxBytes) {
+    const w = img.naturalWidth, h = img.naturalHeight;
+    if (!w || !h) throw new Error("A foto veio vazia. Tente de novo.");
+    for (const [lado, q] of tentativas) {
+      const sc = Math.min(1, lado / Math.max(w, h)), c = document.createElement("canvas");
+      c.width = Math.round(w * sc); c.height = Math.round(h * sc);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      const blob = await new Promise((r) => c.toBlob(r, "image/jpeg", q));
+      c.width = c.height = 0; // libera memória no iPhone
+      if (blob && blob.size <= maxBytes) return blob;
+    }
+    throw new Error("Não consegui reduzir a foto. Tente tirar outra mais de perto.");
+  }
+  async function prepararFoto(file) {
+    const { img, u } = await carregarImg(file);
+    try {
+      const leve = await reduzir(img, [[1280, .8], [1024, .7], [800, .6]], 900 * 1024);
+      const nitida = await reduzir(img, [[2000, .82], [1600, .75], [1280, .7]], 2.5 * 1024 * 1024);
+      const nome = (file.name || "nota").replace(/\.[^.]+$/, "") + ".jpg";
+      return { b64: await toB64(leve), mime: "image/jpeg", anexo: new File([nitida], nome, { type: "image/jpeg" }) };
+    } finally { URL.revokeObjectURL(u); }
+  }
+  async function chamarLeitura(payload) {
+    const ctrl = new AbortController(), timer = setTimeout(() => ctrl.abort(), 45000);
+    try {
+      const { data: { session: s } } = await sb.auth.getSession();
+      const r = await fetch(CFG.supabaseUrl + "/functions/v1/ler-foto", {
+        method: "POST", signal: ctrl.signal,
+        headers: { "Content-Type": "application/json", apikey: CFG.supabaseKey, Authorization: "Bearer " + (s?.access_token || "") },
+        body: JSON.stringify(payload)
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) return { erro: j.erro || ("erro " + r.status), status: r.status };
+      return j;
+    } catch (e) {
+      return { erro: e.name === "AbortError" ? "A leitura demorou demais. Tente de novo." : "Sem conexão com o servidor. Confira a internet." };
+    } finally { clearTimeout(timer); }
+  }
+  async function lerNota(file) {
+    if (!file || !state.user) return;
+    const pdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name || "");
+    lerOcupado(true);
+    lerStatus("Preparando a foto…");
+    let envio;
+    try {
+      if (pdf) {
+        if (file.size > 4 * 1024 * 1024) throw new Error("PDF grande demais para ler (até 4 MB). Ele vai anexado; preencha à mão.");
+        envio = { b64: await toB64(file), mime: "application/pdf", anexo: file };
+      } else {
+        envio = await prepararFoto(file);
+      }
+    } catch (e) {
+      if (pdf && file.size <= MAX_FILE_MB * 1024 * 1024) { state.notaLida = file; $("#nota-label").textContent = "📎 Foto da nota lida (vai anexada)"; }
+      lerOcupado(false); lerStatus(esc(e.message), "err"); return;
+    }
+    state.notaLida = envio.anexo;
+    if (!form.nota.files[0]) $("#nota-label").textContent = "📎 Foto da nota lida (vai anexada)";
+    lerStatus("Lendo a nota… leva uns segundos.");
+    const r = await chamarLeitura({ tipo: "conta", imagem: envio.b64, mime: envio.mime });
+    lerOcupado(false);
+    if (!r || r.erro) {
+      let txt = r?.erro || "Não consegui ler.";
+      if (r?.status === 400 && /tipo/.test(txt)) txt = "A leitura de notas ainda não foi ativada no servidor.";
+      else if (r?.status === 429 || /limite/.test(txt)) txt = "Limite grátis da leitura atingido. Espere 1 minuto e tente de novo.";
+      else if (r?.status === 401) txt = "Sua sessão expirou. Saia e entre de novo.";
+      lerStatus(`${esc(txt)}<small>A foto ficou anexada. Dá para preencher à mão.</small>`, "err");
+      return;
+    }
+    aplicarLeitura(r);
+  }
+  function aplicarLeitura(r) {
+    const sug = ContasLeitura.sugerir(r, {
+      historico: state.hist.lidas,
+      descricoes: state.hist.descFreq,
+      origens: state.hist.origens,
+      hoje: todayStr()
+    });
+    if (!sug.valor && !sug.descricao && !sug.data) {
+      lerStatus("Não achei os dados nessa foto. Tente de novo mais de perto, com a nota reta e bem iluminada.<small>A foto ficou anexada.</small>", "err");
+      return;
+    }
+    state.leitura = sug.leitura;
+    const livre = (nome) => !state.tocados.has(nome);
+    const pinta = (el) => el.classList.add("lido");
+    if (sug.valor && livre("valor")) { form.valor.value = valorToInput(sug.valor); pinta(form.valor); }
+    if (sug.descricao && livre("descricao")) { form.descricao.value = sug.descricao; pinta(form.descricao); }
+    if (sug.data && livre("data_compra")) { form.data_compra.value = sug.data; pinta(form.data_compra); }
+    if (sug.tipo && !state.tocados.has("tipo")) {
+      setTipo(sug.tipo);
+      if (sug.tipo === "parcelado") {
+        form.parcela_atual.value = sug.parcelaAtual; form.total_parcelas.value = sug.totalParcelas;
+        form.gerar_parcelas.checked = true; pinta(form.total_parcelas);
+      }
+    }
+    if (sug.origem && !state.origemTocada && !ehReceber()) { form.origem.value = sug.origem; renderOrigemChips(); pinta(form.origem); }
+    let abrirMais = false;
+    if (sug.vencimento && livre("vencimento")) { form.vencimento.value = sug.vencimento; pinta(form.vencimento); abrirMais = true; }
+    if (sug.observacao && livre("observacao") && !form.observacao.value.trim()) { form.observacao.value = sug.observacao; pinta(form.observacao); }
+    if (abrirMais) $("#mais-opcoes").open = true;
+
+    // resumo do que foi lido e de onde veio cada palpite
+    const partes = [];
+    if (r.estabelecimento) partes.push(`<b>${esc(r.estabelecimento)}</b>`);
+    if (sug.valor) partes.push(sug.tipo === "parcelado" ? `${sug.totalParcelas}x de R$ ${valorToInput(sug.valor)}` : `R$ ${valorToInput(sug.valor)}`);
+    if (sug.data) partes.push(fmtDate(sug.data));
+    const porque = [];
+    if (sug.fontes.descricao === "lugar") porque.push("descrição igual à última vez nesse lugar");
+    if (sug.fontes.origem === "cartao") porque.push(`origem pelo cartão final ${esc(sug.leitura.cartaoFinal)}`);
+    else if (sug.fontes.origem === "lugar") porque.push("origem igual à última vez nesse lugar");
+    else if (sug.fontes.origem === "banco") porque.push("origem pelo banco do cartão");
+    else if (sug.fontes.origem) porque.push("origem pela forma de pagamento");
+    lerStatus(`✓ Lido: ${partes.join(" · ")}<small>${porque.length ? cap1(porque.join("; ")) + ". " : ""}Confira os campos em verde antes de salvar.</small>`, "ok");
+    $("#ler-btn-txt").textContent = "📷 Ler outra foto";
+  }
+  const cap1 = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+  ["#ler-camera", "#ler-arquivo"].forEach((sel) => {
+    $(sel).addEventListener("change", (e) => {
+      const f = e.target.files && e.target.files[0];
+      e.target.value = "";
+      lerNota(f);
+    });
+  });
+  // tipo escolhido à mão: a leitura não troca mais
+  $("#tipo-seg").addEventListener("click", (e) => { if (e.isTrusted && e.target.closest("[data-tipo]")) state.tocados.add("tipo"); });
 
   function openForm(conta = null, manter = null) {
     state.editing = conta;
     state.removeNota = false;
     state.origemTocada = false;
+    state.leitura = null; state.notaLida = null; state.tocados = new Set();
     form.reset();
+    form.querySelectorAll(".lido").forEach((el) => el.classList.remove("lido"));
+    lerStatus(""); lerOcupado(false);
     $("#nota-label").textContent = "📎 Anexar nota fiscal";
     $("#form-error").hidden = true;
     $("#form-title").textContent = conta ? "Editar conta" : "Nova conta";
@@ -613,6 +788,7 @@
     form.querySelectorAll("input, select, textarea, #tipo-seg button, #direcao-seg button, #origem-chips button").forEach((el) => { el.disabled = ro; });
     form.querySelector(".sheet-foot").hidden = ro;
     form.querySelector(".file-btn").hidden = ro;
+    $("#ler-nota").hidden = ro || !!conta || ehReceber();
     $("#nota-remover").hidden = ro;
     if (ro) { $("#form-title").textContent = "Detalhe"; $("#mais-opcoes").open = true; }
     if (!dlg.open) dlg.showModal();
@@ -675,7 +851,7 @@
       if (base.parcela_atual > base.total_parcelas) return formError("A parcela atual não pode ser maior que o total.");
     }
 
-    const file = form.nota.files[0] || null;
+    const file = form.nota.files[0] || state.notaLida || null;
     if (file && file.size > MAX_FILE_MB * 1024 * 1024) return formError(`O arquivo passa de ${MAX_FILE_MB} MB.`);
 
     const btns = [$("#form-save"), $("#form-save-next")];
@@ -689,6 +865,7 @@
         if (error) throw error;
         conta = data;
       } else {
+        if (state.leitura && !state.semColunaLeitura && !base.receber) base.leitura = state.leitura;
         const rows = [base];
         if (tipo === "parcelado" && form.gerar_parcelas.checked) {
           for (let p = base.parcela_atual + 1, k = 1; p <= base.total_parcelas; p++, k++) {
@@ -702,7 +879,13 @@
             });
           }
         }
-        const { data, error } = await sb.from("contas").insert(rows).select();
+        let { data, error } = await sb.from("contas").insert(rows).select();
+        if (error && base.leitura && /leitura/i.test(error.message || "")) {
+          // banco ainda sem a coluna da v13: salva normalmente, só sem o que foi lido
+          state.semColunaLeitura = true;
+          rows.forEach((r) => delete r.leitura);
+          ({ data, error } = await sb.from("contas").insert(rows).select());
+        }
         if (error) throw error;
         conta = data[0];
         qtd = rows.length;
