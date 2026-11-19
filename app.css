@@ -180,3 +180,29 @@ body.leitor .pay-toggle { pointer-events: none; }
 .push-acoes { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .push-acoes .btn { min-height: 38px; padding: 8px 14px; }
 .push-box .btn:not(.primary) { background: var(--surface); border: 1px solid var(--border); }
+
+/* ---------- v13: ler a nota pela foto ---------- */
+.ler-nota { display: grid; gap: 6px; justify-items: center; }
+.ler-btn {
+  position: relative; overflow: hidden; width: 100%; min-height: 48px;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  border-radius: 12px; background: var(--accent-soft); color: var(--accent-strong);
+  border: 1px solid var(--accent); font-size: 15px; font-weight: 700; cursor: pointer;
+}
+.ler-btn input, .ler-alt input { position: absolute; inset: 0; opacity: 0; cursor: pointer; min-height: 0; width: 100%; }
+.ler-btn.busy { pointer-events: none; opacity: .75; }
+.ler-btn.busy #ler-btn-txt::after { content: ""; display: inline-block; width: 14px; height: 14px; margin-left: 8px; vertical-align: -2px;
+  border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: ler-gira .8s linear infinite; }
+@keyframes ler-gira { to { transform: rotate(360deg); } }
+.ler-alt { position: relative; font-size: 13px; color: var(--muted); text-decoration: underline; cursor: pointer; }
+.ler-status { margin: 0; width: 100%; font-size: 13px; line-height: 1.4; padding: 8px 12px; border-radius: 10px;
+  background: var(--surface-2); color: var(--text); }
+.ler-status.ok { background: var(--accent-soft); color: var(--accent-strong); }
+.ler-status.err { background: var(--danger-soft); color: var(--danger); }
+.ler-status b { font-weight: 700; }
+.ler-status small { display: block; color: var(--muted); margin-top: 2px; }
+/* campos que vieram da nota: contorno até a pessoa mexer */
+.lido { outline: 2px solid var(--accent); outline-offset: 1px; }
+.valor-row:has(.lido) { border-color: var(--accent); }
+.valor-row .lido { outline: none; }
+@media (prefers-reduced-motion: reduce) { .ler-btn.busy #ler-btn-txt::after { animation: none; } }
