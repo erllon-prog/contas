@@ -15,7 +15,7 @@
   <link rel="icon" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <link rel="stylesheet" href="../comum/nucleo.css?v=1">
-  <link rel="stylesheet" href="app.css?v=13">
+  <link rel="stylesheet" href="app.css?v=14">
 </head>
 <body>
   <!-- APP -->
@@ -33,6 +33,7 @@
       <button id="open-pdf">Gerar PDF do mês para enviar</button>
       <button id="copy-monthly">Trazer contas mensais do mês anterior</button>
       <button id="export-csv">Exportar mês em CSV</button>
+      <button id="open-voz" hidden>🎙️ Lançar por voz (Siri)</button>
       <button id="open-amigos">Amigos <span id="amigos-badge" class="badge novo" hidden></span></button>
       <button id="open-users" hidden>Usuários e acessos <span id="novos-badge" class="badge novo" hidden></span></button>
       <button id="abrir-apps">Nossos apps</button>
@@ -258,13 +259,47 @@
     </form>
   </dialog>
 
+  <!-- VOZ -->
+  <dialog id="voz-dialog" class="sheet">
+    <div class="sheet-body">
+      <header class="sheet-head">
+        <h2>Lançar por voz (Siri)</h2>
+        <button type="button" class="icon-btn" id="voz-close" aria-label="Fechar">✕</button>
+      </header>
+      <p class="muted small">Você fala, por exemplo, "lançar 103,42 de combustível no cartão da mãe" e a conta entra sozinha, no mês aberto para novas contas, com a descrição e a origem que você já usa. A Siri responde o que lançou.</p>
+      <section class="push-box">
+        <h3>1. Chave do Atalho</h3>
+        <p class="muted small" id="voz-status"></p>
+        <input id="voz-chave" readonly hidden>
+        <div class="push-acoes">
+          <button type="button" class="btn primary" id="voz-gerar">Gerar chave</button>
+          <button type="button" class="btn" id="voz-copiar" hidden>Copiar chave</button>
+          <button type="button" class="link danger" id="voz-revogar" hidden>Desativar</button>
+        </div>
+      </section>
+      <section class="push-box">
+        <h3>2. Atalho no iPhone (Atalhos)</h3>
+        <ol class="small" style="margin:0;padding-left:18px;display:grid;gap:4px">
+          <li>Crie um atalho chamado <b>Lançar conta</b> (esse é o nome que você diz para a Siri).</li>
+          <li>Ação <b>Ditar texto</b> (idioma Português).</li>
+          <li>Ação <b>Obter conteúdo do URL</b>: método <b>POST</b>, corpo <b>JSON</b> com dois campos de texto: <code>token</code> = a chave acima, <code>texto</code> = o texto ditado.</li>
+          <li>Ação <b>Obter valor do dicionário</b> (chave <code>fala</code>) e depois <b>Falar texto</b>.</li>
+        </ol>
+        <p class="muted small">URL do passo 3:</p>
+        <input id="voz-url" readonly>
+        <button type="button" class="btn" id="voz-copiar-url">Copiar URL</button>
+      </section>
+      <p class="muted small">Diga "Ei Siri, Lançar conta" e, quando ela perguntar, fale a frase. Na lista, o que entrou por voz traz a observação "Lançado por voz".</p>
+    </div>
+  </dialog>
+
   <div id="toast" class="toast" role="status" hidden></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="../comum/config.js?v=1"></script>
   <script src="../comum/nucleo.js?v=1"></script>
-  <script src="config.js?v=13"></script>
-  <script src="leitura.js?v=13"></script>
-  <script src="app.js?v=13"></script>
+  <script src="config.js?v=14"></script>
+  <script src="leitura.js?v=14"></script>
+  <script src="app.js?v=14"></script>
 </body>
 </html>
