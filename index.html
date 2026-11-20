@@ -15,7 +15,7 @@
   <link rel="icon" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <link rel="stylesheet" href="../comum/nucleo.css?v=1">
-  <link rel="stylesheet" href="app.css?v=14">
+  <link rel="stylesheet" href="app.css?v=15">
 </head>
 <body>
   <!-- APP -->
@@ -154,6 +154,12 @@
           <input name="total_parcelas" type="number" min="1" inputmode="numeric">
         </label>
       </div>
+      <label id="valor-modo-row" hidden>O valor informado é
+        <select name="valor_modo">
+          <option value="total">o total da compra (divide pelas parcelas)</option>
+          <option value="cada">o valor de cada parcela</option>
+        </select>
+      </label>
       <label class="check" id="gerar-row" hidden>
         <input type="checkbox" name="gerar_parcelas" checked>
         Lançar também as próximas parcelas nos meses seguintes
@@ -298,8 +304,8 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="../comum/config.js?v=1"></script>
   <script src="../comum/nucleo.js?v=1"></script>
-  <script src="config.js?v=14"></script>
-  <script src="leitura.js?v=14"></script>
-  <script src="app.js?v=14"></script>
+  <script src="config.js?v=15"></script>
+  <script src="leitura.js?v=15"></script>
+  <script src="app.js?v=15"></script>
 </body>
 </html>
