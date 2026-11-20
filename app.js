@@ -49,7 +49,7 @@
   // ---------------------------------------------------------------- estado
   const state = {
     user: null,
-    month: currentMonthKey(),   // "AAAA-MM"
+    month: mesPadrao(),         // "AAAA-MM": mês em que as novas contas entram (vira no dia seguinte ao acerto)
     contas: [],
     filter: "todas",
     origem: lsGet(LS.origem),   // filtro de origem ("" = todas)
@@ -82,6 +82,13 @@
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   }
   function currentMonthKey() { return todayStr().slice(0, 7); }
+  // Do dia 1 ao dia DIA_VIRADA a pessoa está acertando o mês corrente; depois disso o app já abre no mês seguinte,
+  // para lançar as contas novas. (Muda o número aqui se o acerto passar a ser em outros dias.)
+  function mesPadrao() {
+    const DIA_VIRADA = 8;                       // dentro da função: o estado inicial a chama antes das constantes abaixo
+    const h = todayStr();
+    return Number(h.slice(8, 10)) > DIA_VIRADA ? shiftMonthKey(h.slice(0, 7), 1) : h.slice(0, 7);
+  }
   function monthToDb(key) { return `${key}-01`; }
   function shiftMonthKey(key, n) {
     const [y, m] = key.split("-").map(Number);
@@ -172,6 +179,7 @@
     document.body.classList.toggle("leitor", ro);
     $("#add-btn").hidden = ro;
     $("#copy-monthly").hidden = ro;
+    $("#open-voz").hidden = ro;
     $("#open-users").hidden = state.perfil?.papel !== "admin";
     const duas = !!state.user && temProprias();
     $("#visao-seg").hidden = !duas;
@@ -407,6 +415,17 @@
     const { error } = await sb.from("contas").update(patch).eq("id", conta.id);
     if (error) { toast(friendlyError(error)); loadMonth(); } else loadAlertas();
   }
+
+  // app aberto há dias (o iPhone mantém o app na memória): ao voltar, se o mês padrão virou, acompanha
+  let padraoVisto = mesPadrao();
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") return;
+    const novo = mesPadrao();
+    if (novo === padraoVisto) return;          // não mexe se a pessoa navegou para outro mês de propósito
+    padraoVisto = novo;
+    state.month = novo;
+    if (state.user) loadMonth();
+  });
 
   // ---------------------------------------------------------------- navegação e filtros
   $("#prev-month").addEventListener("click", () => { state.month = shiftMonthKey(state.month, -1); loadMonth(); });
@@ -1052,6 +1071,38 @@
     const conta = state.contas.find((c) => c.id === a.id);
     if (conta) openForm(conta);
   });
+
+  // ---------------------------------------------------------------- lançar por voz (Atalho da Siri → função lancar-voz)
+  const vozDlg = $("#voz-dialog");
+  async function vozAtualizar(chave) {
+    const { data } = await sb.rpc("tem_token_voz");
+    const tem = data === true || !!chave;
+    $("#voz-status").textContent = chave
+      ? "Chave nova gerada. Copie agora: ela não aparece de novo (se perder, gere outra)."
+      : (tem ? "Já existe uma chave ativa. Gerar outra invalida a anterior." : "Ainda não há chave.");
+    $("#voz-chave").hidden = !chave;
+    $("#voz-chave").value = chave || "";
+    $("#voz-copiar").hidden = !chave;
+    $("#voz-revogar").hidden = !tem;
+    $("#voz-gerar").textContent = tem ? "Gerar outra chave" : "Gerar chave";
+    $("#voz-url").value = CFG.supabaseUrl + "/functions/v1/lancar-voz";
+  }
+  $("#open-voz").addEventListener("click", () => { closeMenu(); vozAtualizar(""); vozDlg.showModal(); });
+  $("#voz-close").addEventListener("click", () => vozDlg.close());
+  vozDlg.addEventListener("click", (e) => { if (e.target === vozDlg) vozDlg.close(); });
+  $("#voz-gerar").addEventListener("click", async () => {
+    const { data, error } = await sb.rpc("gerar_token_voz");
+    if (error) return toast(/gerar_token_voz|function/i.test(error.message || "") ? "Falta rodar o SQL da v14 no Supabase." : friendlyError(error));
+    vozAtualizar(data);
+  });
+  $("#voz-revogar").addEventListener("click", async () => {
+    if (!confirm("Desativar a chave? O Atalho da Siri para de funcionar.")) return;
+    await sb.rpc("revogar_token_voz");
+    vozAtualizar("");
+  });
+  const copiar = async (txt, ok) => { try { await navigator.clipboard.writeText(txt); toast(ok); } catch { toast("Não consegui copiar; selecione e copie à mão."); } };
+  $("#voz-copiar").addEventListener("click", () => copiar($("#voz-chave").value, "Chave copiada."));
+  $("#voz-copiar-url").addEventListener("click", () => copiar($("#voz-url").value, "URL copiada."));
 
   // ---------------------------------------------------------------- notificações no celular
   // O aviso sai do servidor (todo dia às 8h). Aqui só guardamos o "endereço" de notificação deste aparelho.
