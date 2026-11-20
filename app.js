@@ -44,7 +44,7 @@
   const sb = nucleo.sb;
 
   const MAX_FILE_MB = 10;
-  const LS = { origem: "contas.origemFiltro", lastOrigem: "contas.ultimaOrigem", lastTipo: "contas.ultimoTipo", pdf: "contas.pdfOrigem", visao: "contas.visao", avisoDias: "contas.avisoDias", avisoVisto: "contas.avisoVisto", instalarFechado: "contas.instalarFechado" };
+  const LS = { origem: "contas.origemFiltro", lastOrigem: "contas.ultimaOrigem", lastTipo: "contas.ultimoTipo", pdf: "contas.pdfOrigem", visao: "contas.visao", avisoDias: "contas.avisoDias", avisoVisto: "contas.avisoVisto", instalarFechado: "contas.instalarFechado", valorModo: "contas.valorModo" };
 
   // ---------------------------------------------------------------- estado
   const state = {
@@ -520,6 +520,7 @@
     const parcelado = tipo === "parcelado";
     $("#parcelas-row").hidden = !parcelado;
     $("#gerar-row").hidden = !parcelado || !!state.editing;
+    $("#valor-modo-row").hidden = !parcelado || !!state.editing;
     if (parcelado && !form.parcela_atual.value) form.parcela_atual.value = 1;
   }
   function setDirecao(receber) {
@@ -728,6 +729,7 @@
       if (sug.tipo === "parcelado") {
         form.parcela_atual.value = sug.parcelaAtual; form.total_parcelas.value = sug.totalParcelas;
         form.gerar_parcelas.checked = true; pinta(form.total_parcelas);
+        form.valor_modo.value = "cada";        // a nota informa o valor da parcela
       }
     }
     if (sug.origem && !state.origemTocada && !ehReceber()) { form.origem.value = sug.origem; renderOrigemChips(); pinta(form.origem); }
@@ -797,6 +799,7 @@
       form.origem.value = manter?.origem ?? (state.origem || (ehReceber() ? "" : lsGet(LS.lastOrigem)));
       form.data_compra.value = manter?.data_compra || todayStr();
       form.mes_referencia.value = manter?.mes || state.month;
+      form.valor_modo.value = lsGet(LS.valorModo) || "total";
       setTipo(manter?.tipo || lsGet(LS.lastTipo) || "avulso");
       if (form.tipo.value === "parcelado") form.total_parcelas.value = "";
     }
@@ -869,6 +872,16 @@
       if (!base.parcela_atual || !base.total_parcelas) return formError("Informe a parcela atual e o total de parcelas.");
       if (base.parcela_atual > base.total_parcelas) return formError("A parcela atual não pode ser maior que o total.");
     }
+    // valor informado como total da compra: divide pelas parcelas (a última leva os centavos que sobram)
+    let valorDaParcela = () => base.valor;
+    if (!ed && tipo === "parcelado") {
+      lsSet(LS.valorModo, form.valor_modo.value);
+      if (form.valor_modo.value === "total" && base.total_parcelas > 1) {
+        const totalCompra = valor, n = base.total_parcelas, por = Math.round((totalCompra / n) * 100) / 100;
+        valorDaParcela = (p) => (p === n ? Math.round((totalCompra - por * (n - 1)) * 100) / 100 : por);
+        base.valor = valorDaParcela(base.parcela_atual);
+      }
+    }
 
     const file = form.nota.files[0] || state.notaLida || null;
     if (file && file.size > MAX_FILE_MB * 1024 * 1024) return formError(`O arquivo passa de ${MAX_FILE_MB} MB.`);
@@ -891,6 +904,7 @@
             rows.push({
               ...base,
               parcela_atual: p,
+              valor: valorDaParcela(p),
               mes_referencia: addMonthsDate(base.mes_referencia, k),
               vencimento: addMonthsDate(base.vencimento, k),
               pago: false,
