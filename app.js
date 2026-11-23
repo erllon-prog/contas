@@ -5,7 +5,7 @@
 
   // ---------------------------------------------------------------- núcleo comum (login, perfil, amigos, usuários, avisos)
   // Fica em ../comum/nucleo.js: o mesmo código do Média Flex. Mexeu lá, muda nos dois apps.
-  const VERSAO = 13;
+  const VERSAO = 16;
   const nucleo = Nucleo.iniciar({
     app: "contas",
     nome: "Contas",
@@ -1011,7 +1011,7 @@
     const { data, error } = await sb.from("contas")
       .select("id, descricao, valor, vencimento, receber, origem, mes_referencia")
       .eq("user_id", state.user.id).eq("pago", false)
-      .gte("vencimento", addDias(-60)).lte("vencimento", addDias(diasAviso()))
+      .gte("vencimento", addDias(0)).lte("vencimento", addDias(diasAviso()))
       .order("vencimento", { ascending: true }).limit(60);
     carregandoAlertas = false;
     if (error) return;
